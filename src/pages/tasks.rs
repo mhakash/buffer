@@ -1,7 +1,7 @@
 use chrono::{DateTime, Local, NaiveDate, Utc};
 use gpui::{
-    AnyElement, App, Context, Entity, Focusable, FontWeight, Hsla, SharedString, Subscription,
-    Window, div, prelude::*, px, rgb,
+    AnyElement, App, Context, DragMoveEvent, Entity, Focusable, FontWeight, Hsla, Render,
+    SharedString, Subscription, Window, div, prelude::*, px, rgb,
 };
 
 use crate::{
@@ -25,7 +25,19 @@ pub struct TasksPage {
     draft_category: Option<Id>,
     editing: Option<Id>,
     last_deleted: Option<Task>,
+    drag_session: Option<DragSession>,
     _subscriptions: Vec<Subscription>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct DragSession {
+    dragged_id: Id,
+    target: Option<(Id, bool)>,
+}
+
+enum BandRow {
+    Task(Task),
+    Placeholder,
 }
 
 struct Section {
@@ -34,10 +46,80 @@ struct Section {
     tasks: Vec<Task>,
 }
 
+#[derive(Clone)]
+struct TaskDrag {
+    id: Id,
+    title: SharedString,
+    category: Option<(SharedString, u32)>,
+}
+
+struct TaskDragPreview {
+    title: SharedString,
+    category: Option<(SharedString, u32)>,
+    surface: Hsla,
+    background: Hsla,
+    text: Hsla,
+    text_muted: Hsla,
+    accent: Hsla,
+}
+
+impl Render for TaskDragPreview {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .w(px(540.))
+            .flex()
+            .items_center()
+            .gap_3()
+            .px_3()
+            .py_2()
+            .rounded_xl()
+            .bg(self.surface)
+            .border_2()
+            .border_color(self.accent.opacity(0.45))
+            .shadow_lg()
+            .child(icon(IconName::Grip, self.text.opacity(0.5)).size_3p5())
+            .child(
+                div()
+                    .flex_none()
+                    .size(px(16.))
+                    .rounded_sm()
+                    .border_1()
+                    .bg(self.background)
+                    .border_color(self.text_muted.opacity(0.85)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_sm()
+                    .text_color(self.text)
+                    .child(self.title.clone()),
+            )
+            .when_some(self.category.as_ref(), |this, (name, color)| {
+                let color = hex(*color);
+                this.child(
+                    div()
+                        .flex_none()
+                        .px_2()
+                        .py_0p5()
+                        .rounded_full()
+                        .bg(color.opacity(0.15))
+                        .text_xs()
+                        .text_color(color)
+                        .child(name.clone()),
+                )
+            })
+    }
+}
+
 impl TasksPage {
     pub fn new(store: Entity<TaskStore>, cx: &mut Context<Self>) -> Self {
-        let composer =
-            cx.new(|cx| TextInput::new("Add a task…   tip: #category  !urgent  !high  !low", cx));
+        let composer = cx.new(|cx| {
+            TextInput::new(
+                "Add a task…   #category  !high   ·   \\# \\! for literal # and !",
+                cx,
+            )
+        });
         let subscriptions = vec![
             cx.observe(&store, |_, _, cx| cx.notify()),
             cx.subscribe(
@@ -57,8 +139,123 @@ impl TasksPage {
             draft_category: None,
             editing: None,
             last_deleted: None,
+            drag_session: None,
             _subscriptions: subscriptions,
         }
+    }
+
+    fn complete_drag_if_finished(&mut self, cx: &mut Context<Self>) {
+        let Some(session) = self.drag_session.take() else {
+            return;
+        };
+        if cx.has_active_drag() {
+            self.drag_session = Some(session);
+            return;
+        }
+        if let Some((over_id, before)) = session.target
+            && over_id != session.dragged_id
+        {
+            let dragged_id = session.dragged_id;
+            self.store.update(cx, |store, cx| {
+                store.reorder_task(dragged_id, over_id, before, cx);
+            });
+        }
+    }
+
+    fn ensure_drag_session(&mut self, dragged_id: Id, cx: &mut Context<Self>) {
+        if self.drag_session.is_none() {
+            self.drag_session = Some(DragSession {
+                dragged_id,
+                target: None,
+            });
+            cx.notify();
+        }
+    }
+
+    fn set_drag_target(
+        &mut self,
+        dragged_id: Id,
+        over_id: Id,
+        before: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = &mut self.drag_session else {
+            self.drag_session = Some(DragSession {
+                dragged_id,
+                target: Some((over_id, before)),
+            });
+            cx.notify();
+            return;
+        };
+        if session.dragged_id != dragged_id {
+            return;
+        }
+        let next = Some((over_id, before));
+        if session.target == next {
+            return;
+        }
+        session.target = next;
+        cx.notify();
+    }
+
+    fn band_rows(&self, tasks: &[Task], session: &DragSession) -> Vec<BandRow> {
+        let without: Vec<&Task> = tasks
+            .iter()
+            .filter(|t| t.id != session.dragged_id)
+            .collect();
+
+        match session.target {
+            None => tasks
+                .iter()
+                .map(|t| {
+                    if t.id == session.dragged_id {
+                        BandRow::Placeholder
+                    } else {
+                        BandRow::Task(t.clone())
+                    }
+                })
+                .collect(),
+            Some((over_id, _)) if over_id == session.dragged_id => tasks
+                .iter()
+                .map(|t| {
+                    if t.id == session.dragged_id {
+                        BandRow::Placeholder
+                    } else {
+                        BandRow::Task(t.clone())
+                    }
+                })
+                .collect(),
+            Some((over_id, before)) => {
+                let Some(over_ix) = without.iter().position(|t| t.id == over_id) else {
+                    return tasks.iter().map(|t| BandRow::Task(t.clone())).collect();
+                };
+                let insert_ix = if before { over_ix } else { over_ix + 1 };
+                let mut rows = Vec::new();
+                for (i, t) in without.iter().enumerate() {
+                    if i == insert_ix {
+                        rows.push(BandRow::Placeholder);
+                    }
+                    rows.push(BandRow::Task((*t).clone()));
+                }
+                if insert_ix >= without.len() {
+                    rows.push(BandRow::Placeholder);
+                }
+                rows
+            }
+        }
+    }
+
+    fn render_drop_placeholder(&self, theme: &Theme) -> AnyElement {
+        div()
+            .mx_3()
+            .my_0p5()
+            .h(px(34.))
+            .rounded_xl()
+            .border_2()
+            .border_dashed()
+            .border_color(theme.accent.opacity(0.55))
+            .bg(theme.accent.opacity(0.08))
+            .into_any_element()
     }
 
     pub fn focus_composer(&self, window: &mut Window, cx: &App) {
@@ -385,7 +582,7 @@ impl TasksPage {
     fn sections(&self, mut tasks: Vec<Task>) -> Vec<Section> {
         match self.view {
             View::Todo => {
-                tasks.sort_by_key(|t| (t.priority, t.created_at));
+                tasks.sort_by_key(|t| (t.priority, t.sort_order, t.created_at));
                 Priority::ALL
                     .into_iter()
                     .filter_map(|priority| {
@@ -431,7 +628,8 @@ impl TasksPage {
         &self,
         tasks: Vec<Task>,
         categories: &[Category],
-        cx: &Context<Self>,
+        reorderable: bool,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme().clone();
         if tasks.is_empty() {
@@ -465,15 +663,40 @@ impl TasksPage {
                 .into_any_element();
         }
 
-        div()
-            .flex()
-            .flex_col()
-            .gap_5()
-            .children(self.sections(tasks).into_iter().map(|section| {
+        let mut section_elements = Vec::new();
+        for section in self.sections(tasks) {
+            let mut task_rows = Vec::new();
+            let band_rows = if reorderable {
+                if let Some(session) = &self.drag_session
+                    && section.tasks.iter().any(|t| t.id == session.dragged_id)
+                {
+                    self.band_rows(&section.tasks, session)
+                } else {
+                    section.tasks.iter().cloned().map(BandRow::Task).collect()
+                }
+            } else {
+                section.tasks.iter().cloned().map(BandRow::Task).collect()
+            };
+            for row in band_rows {
+                match row {
+                    BandRow::Placeholder => {
+                        task_rows.push(self.render_drop_placeholder(&theme));
+                    }
+                    BandRow::Task(task) => {
+                        let category = task
+                            .category
+                            .and_then(|id| categories.iter().find(|c| c.id == id));
+                        task_rows.push(
+                            self.render_row(&task, category, reorderable, cx)
+                                .into_any_element(),
+                        );
+                    }
+                }
+            }
+            section_elements.push(
                 div()
                     .flex()
                     .flex_col()
-                    .gap_0p5()
                     .child(
                         div()
                             .flex()
@@ -490,13 +713,27 @@ impl TasksPage {
                             .child(section.title.to_uppercase())
                             .child(div().opacity(0.7).child(section.tasks.len().to_string())),
                     )
-                    .children(section.tasks.iter().map(|task| {
-                        let category = task
-                            .category
-                            .and_then(|id| categories.iter().find(|c| c.id == id));
-                        self.render_row(task, category, cx)
-                    }))
-            }))
+                    .children(task_rows)
+                    .into_any_element(),
+            );
+        }
+
+        div()
+            .id("task-list")
+            .flex()
+            .flex_col()
+            .gap_5()
+            .when(reorderable, |this| {
+                this.on_drag_move::<TaskDrag>(cx.listener(
+                    |this, event: &DragMoveEvent<TaskDrag>, _, cx| {
+                        let Some(drag) = event.dragged_item().downcast_ref::<TaskDrag>() else {
+                            return;
+                        };
+                        this.ensure_drag_session(drag.id, cx);
+                    },
+                ))
+            })
+            .children(section_elements)
             .into_any_element()
     }
 
@@ -504,13 +741,13 @@ impl TasksPage {
         &self,
         task: &Task,
         category: Option<&Category>,
-        cx: &Context<Self>,
+        reorderable: bool,
+        cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let theme = cx.theme().clone();
         let id = task.id;
         let done = task.is_done();
         let priority = task.priority;
-        let priority_color = hex(priority.color());
         let group = SharedString::from(format!("task-row-{id}"));
         let hover = theme.hover;
         let meta = match task.completed_at {
@@ -518,24 +755,29 @@ impl TasksPage {
             None => age(task.created_at),
         };
 
+        let checkbox_border = theme.text_muted.opacity(0.85);
+        let checkbox_fill = theme.text;
+        let checkbox_mark = theme.background;
+
         let checkbox = div()
             .id(("check", id))
             .flex()
             .flex_none()
             .items_center()
             .justify_center()
-            .size(px(18.))
-            .rounded_full()
-            .border_2()
+            .size(px(16.))
+            .rounded_sm()
+            .border_1()
             .cursor_pointer()
             .map(|this| {
                 if done {
-                    this.border_color(theme.success)
-                        .bg(theme.success)
-                        .child(icon(IconName::Check, gpui::white()).size_2p5())
+                    this.border_color(checkbox_fill)
+                        .bg(checkbox_fill)
+                        .child(icon(IconName::Check, checkbox_mark).size_2())
                 } else {
-                    this.border_color(priority_color)
-                        .hover(move |s| s.bg(priority_color.opacity(0.25)))
+                    this.bg(theme.background)
+                        .border_color(checkbox_border)
+                        .hover(move |s| s.bg(theme.hover))
                 }
             })
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -572,57 +814,112 @@ impl TasksPage {
                     .on_click(cx.listener(move |this, _, _, cx| this.delete(id, cx))),
             );
 
-        div()
+        let category_drag = category.map(|c| (c.name.clone().into(), c.color));
+        let drag_handle = reorderable.then(|| {
+            let drag = TaskDrag {
+                id,
+                title: task.title.clone().into(),
+                category: category_drag,
+            };
+            let surface = theme.surface;
+            let background = theme.background;
+            let text = theme.text;
+            let text_muted = theme.text_muted;
+            let accent = theme.accent;
+            div()
+                .id(("drag", id))
+                .flex_none()
+                .cursor_move()
+                .opacity(0.)
+                .group_hover(group.clone(), |s| s.opacity(1.))
+                .child(icon(IconName::Grip, theme.text_muted).size_3p5())
+                .on_drag(drag, move |drag: &TaskDrag, _, _, cx| {
+                    cx.new(|_| TaskDragPreview {
+                        title: drag.title.clone(),
+                        category: drag.category.clone(),
+                        surface,
+                        background,
+                        text,
+                        text_muted,
+                        accent,
+                    })
+                })
+        });
+
+        let mut row = div()
             .id(("task", id))
             .group(group)
             .flex()
             .items_center()
-            .gap_3()
+            .gap_1p5()
             .px_3()
-            .py_2()
+            .py_1()
             .rounded_xl()
             .when(self.editing == Some(id), |this| this.bg(theme.selected))
             .hover(move |s| s.bg(hover))
-            .child(checkbox)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .text_sm()
-                    .when(done, |this| {
-                        this.line_through().text_color(theme.text_muted)
-                    })
-                    .child(task.title.clone()),
-            )
-            .when_some(category, |this, category| {
-                let color = hex(category.color);
-                this.child(
-                    div()
-                        .flex_none()
-                        .px_2()
-                        .py_0p5()
-                        .rounded_full()
-                        .bg(color.opacity(0.15))
-                        .text_xs()
-                        .text_color(color)
-                        .child(category.name.clone()),
-                )
-            })
-            .child(
+            .when_some(drag_handle, |this, handle| this.child(handle))
+            .child(checkbox);
+        if reorderable {
+            row = row.on_drag_move::<TaskDrag>(cx.listener(
+                move |this, event: &DragMoveEvent<TaskDrag>, _, cx| {
+                    let Some(drag) = event.dragged_item().downcast_ref::<TaskDrag>() else {
+                        return;
+                    };
+                    let dragged_id = drag.id;
+                    this.ensure_drag_session(dragged_id, cx);
+                    let pos = event.event.position;
+                    let bounds = event.bounds;
+                    if pos.y < bounds.top() || pos.y > bounds.bottom() {
+                        return;
+                    }
+                    if dragged_id == id {
+                        return;
+                    }
+                    let before = pos.y < bounds.center().y;
+                    this.set_drag_target(dragged_id, id, before, cx);
+                },
+            ));
+        }
+        row.child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_sm()
+                .when(done, |this| {
+                    this.line_through().text_color(theme.text_muted)
+                })
+                .child(task.title.clone()),
+        )
+        .when_some(category, |this, category| {
+            let color = hex(category.color);
+            this.child(
                 div()
                     .flex_none()
-                    .w(px(40.))
-                    .text_right()
+                    .px_2()
+                    .py_0p5()
+                    .rounded_full()
+                    .bg(color.opacity(0.15))
                     .text_xs()
-                    .text_color(theme.text_muted)
-                    .child(meta),
+                    .text_color(color)
+                    .child(category.name.clone()),
             )
-            .child(actions)
+        })
+        .child(
+            div()
+                .flex_none()
+                .w(px(40.))
+                .text_right()
+                .text_xs()
+                .text_color(theme.text_muted)
+                .child(meta),
+        )
+        .child(actions)
     }
 }
 
 impl Render for TasksPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.complete_drag_if_finished(cx);
         let theme = cx.theme().clone();
         let store = self.store.read(cx);
         let categories = store.categories().to_vec();
@@ -705,7 +1002,7 @@ impl Render for TasksPage {
                         ),
                 )
             })
-            .child(self.render_list(visible, &categories, cx))
+            .child(self.render_list(visible, &categories, self.view == View::Todo, cx))
     }
 }
 

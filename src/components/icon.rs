@@ -8,6 +8,7 @@ use gpui::{AssetSource, Hsla, SharedString, Svg, prelude::*, svg};
 pub enum IconName {
     Check,
     Flag,
+    Grip,
     Pencil,
     Plus,
     Settings,
@@ -26,6 +27,11 @@ const ICONS: &[(IconName, &str, &[u8])] = &[
         IconName::Flag,
         "icons/flag.svg",
         include_bytes!("../../assets/icons/flag.svg"),
+    ),
+    (
+        IconName::Grip,
+        "icons/grip.svg",
+        include_bytes!("../../assets/icons/grip.svg"),
     ),
     (
         IconName::Pencil,

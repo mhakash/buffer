@@ -48,10 +48,12 @@ impl TaskStore {
         cx: &mut Context<Self>,
     ) {
         let id = self.next_id();
+        let sort_order = self.next_sort_order(priority);
         self.data.tasks.push(Task {
             id,
             title,
             priority,
+            sort_order,
             category,
             created_at: Utc::now(),
             completed_at: None,
@@ -86,10 +88,77 @@ impl TaskStore {
     }
 
     pub fn set_priority(&mut self, id: Id, priority: Priority, cx: &mut Context<Self>) {
+        let Some(existing) = self.task(id).map(|t| t.priority) else {
+            return;
+        };
+        if existing == priority {
+            return;
+        }
+        let sort_order = self.next_sort_order(priority);
         if let Some(task) = self.task_mut(id) {
             task.priority = priority;
+            task.sort_order = sort_order;
             self.commit(cx);
         }
+    }
+
+    /// Move an open task before or after another open task in the same priority band.
+    pub fn reorder_task(
+        &mut self,
+        dragged_id: Id,
+        over_id: Id,
+        before: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if dragged_id == over_id {
+            return;
+        }
+        let Some(dragged) = self.task(dragged_id).cloned() else {
+            return;
+        };
+        let Some(over) = self.task(over_id).cloned() else {
+            return;
+        };
+        if dragged.is_done() || over.is_done() || dragged.priority != over.priority {
+            return;
+        }
+
+        let mut band: Vec<Task> = self
+            .data
+            .tasks
+            .iter()
+            .filter(|t| !t.is_done() && t.priority == dragged.priority)
+            .cloned()
+            .collect();
+        band.sort_by_key(|t| (t.sort_order, t.created_at));
+
+        let Some(from_ix) = band.iter().position(|t| t.id == dragged_id) else {
+            return;
+        };
+        let Some(over_ix) = band.iter().position(|t| t.id == over_id) else {
+            return;
+        };
+
+        let old_order: Vec<Id> = band.iter().map(|t| t.id).collect();
+        let mut target_ix = if before { over_ix } else { over_ix + 1 };
+        let task = band.remove(from_ix);
+        if from_ix < target_ix {
+            target_ix = target_ix.saturating_sub(1);
+        }
+        target_ix = target_ix.min(band.len());
+        band.insert(target_ix, task);
+
+        let new_order: Vec<Id> = band.iter().map(|t| t.id).collect();
+        if old_order == new_order {
+            return;
+        }
+
+        for (ix, task) in band.iter().enumerate() {
+            if let Some(t) = self.task_mut(task.id) {
+                t.sort_order = ix as u64;
+            }
+        }
+        self.commit(cx);
     }
 
     pub fn delete_task(&mut self, id: Id, cx: &mut Context<Self>) -> Option<Task> {
@@ -163,6 +232,16 @@ impl TaskStore {
         let id = self.data.next_id;
         self.data.next_id += 1;
         id
+    }
+
+    fn next_sort_order(&self, priority: Priority) -> u64 {
+        self.data
+            .tasks
+            .iter()
+            .filter(|t| !t.is_done() && t.priority == priority)
+            .map(|t| t.sort_order)
+            .max()
+            .map_or(0, |max| max + 1)
     }
 
     fn commit(&mut self, cx: &mut Context<Self>) {

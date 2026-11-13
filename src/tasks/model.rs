@@ -79,6 +79,9 @@ pub struct Task {
     pub id: Id,
     pub title: String,
     pub priority: Priority,
+    /// Order within the same priority band on the To do list (lower = higher).
+    #[serde(default)]
+    pub sort_order: u64,
     #[serde(default)]
     pub category: Option<Id>,
     pub created_at: DateTime<Utc>,
@@ -130,21 +133,47 @@ pub struct QuickAdd {
 }
 
 /// Parses `Fix login bug #work !high` into title, category and priority.
-/// Unrecognised `!tokens` stay in the title.
+/// Unrecognised `!tokens` stay in the title. Prefix `#` or `!` with `\` for literals (`\#tag`, `\!wow`).
 pub fn parse_quick_add(input: &str) -> QuickAdd {
     let mut parsed = QuickAdd::default();
     let mut words = Vec::new();
     for word in input.split_whitespace() {
+        if word.starts_with('\\') {
+            words.push(unescape_quick_add_word(word));
+            continue;
+        }
         if let Some(name) = word.strip_prefix('#').filter(|name| !name.is_empty()) {
             parsed.category = Some(name.to_string());
         } else if let Some(priority) = word.strip_prefix('!').and_then(Priority::parse) {
             parsed.priority = Some(priority);
         } else {
-            words.push(word);
+            words.push(word.to_string());
         }
     }
     parsed.title = words.join(" ");
     parsed
+}
+
+fn unescape_quick_add_word(word: &str) -> String {
+    let mut out = String::with_capacity(word.len());
+    let mut chars = word.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('\\') => out.push('\\'),
+            Some('#') => out.push('#'),
+            Some('!') => out.push('!'),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 /// Comparison key so `#follow-up`, `#followup` and "Follow up" all hit the same category.
@@ -173,6 +202,14 @@ mod tests {
         assert_eq!(parsed.title, "Say hi! # !wow");
         assert_eq!(parsed.priority, None);
         assert_eq!(parsed.category, None);
+    }
+
+    #[test]
+    fn backslash_escapes_hash_and_bang() {
+        let parsed = parse_quick_add(r"Post in \#random \!urgent #work");
+        assert_eq!(parsed.title, "Post in #random !urgent");
+        assert_eq!(parsed.category.as_deref(), Some("work"));
+        assert_eq!(parsed.priority, None);
     }
 
     #[test]

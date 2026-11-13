@@ -32,6 +32,7 @@ pub struct Theme {
     pub text_muted: Hsla,
     pub accent: Hsla,
     pub accent_text: Hsla,
+    #[allow(dead_code)]
     pub success: Hsla,
     pub danger: Hsla,
 }

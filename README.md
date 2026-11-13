@@ -48,9 +48,11 @@ Type in the composer and press Enter. Inline tokens (anywhere in the text):
 |---|---|
 | `#name` | Category; matched loosely (`#follow-up` = "Follow-up"), created if new |
 | `!urgent` `!high` `!medium` `!low` (or `!1`–`!4`) | Priority |
+| `\#` `\!` `\\` | Literal `#`, `!`, or `\` in the title (prefix the word, e.g. `\#channel`) |
 
 Without tokens, the priority/category chips under the input apply. Hover a task for actions:
-cycle priority (●), edit (✎), delete (✕, with Undo). Click the circle to complete; Done groups by day.
+drag the handle to reorder within a priority group (preview while dragging; saved on release), cycle priority, edit, delete (with Undo).
+Click the circle to complete; Done groups by day.
 
 ## Shortcuts
 
