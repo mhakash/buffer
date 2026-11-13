@@ -1,0 +1,26 @@
+[package]
+name = "workdesk"
+version = "0.2.0"
+edition = "2024"
+description = "Desktop app for work tooling, built on GPUI"
+publish = false
+
+[dependencies]
+gpui = "0.2.2"
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+unicode-segmentation = "1"
+
+# Compile Metal shaders at runtime so the build only needs Xcode Command Line Tools, not full Xcode.
+[target.'cfg(target_os = "macos")'.dependencies]
+gpui = { version = "0.2.2", features = ["runtime_shaders"] }
+
+[profile.dev]
+# GPUI is slow unoptimized; optimize dependencies while keeping our crate fast to rebuild.
+package."*" = { opt-level = 2 }
+
+[profile.release]
+strip = true
