@@ -1,9 +1,20 @@
-use gpui::{App, Global, Hsla, rgb};
+//! Light/dark appearance (persisted) on top of the gpui-kit `Theme` global.
+//!
+//! Colors live in `themes/workdesk.json` (gpui-kit theme format) and are embedded at build time.
+//! Debug builds also watch `themes/`, so palette edits apply to the running app on save.
+
+use gpui_kit::{
+    App, SharedString,
+    component::{Theme, ThemeMode, ThemeRegistry},
+};
 use serde::{Deserialize, Serialize};
 
 use crate::storage;
 
 const SETTINGS_FILE: &str = "settings.json";
+const THEMES: &str = include_str!("../themes/workdesk.json");
+const LIGHT: &str = "Workdesk Light";
+const DARK: &str = "Workdesk Dark";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -13,105 +24,82 @@ pub enum Appearance {
     Dark,
 }
 
+impl Appearance {
+    pub fn current(cx: &App) -> Self {
+        if Theme::global(cx).is_dark() {
+            Self::Dark
+        } else {
+            Self::Light
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Light => "Light",
+            Self::Dark => "Dark",
+        }
+    }
+
+    fn mode(self) -> ThemeMode {
+        match self {
+            Self::Light => ThemeMode::Light,
+            Self::Dark => ThemeMode::Dark,
+        }
+    }
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct Settings {
     #[serde(default)]
     appearance: Appearance,
 }
 
-#[derive(Clone, Debug)]
-pub struct Theme {
-    pub appearance: Appearance,
-    pub background: Hsla,
-    pub surface: Hsla,
-    pub sidebar: Hsla,
-    pub border: Hsla,
-    pub hover: Hsla,
-    pub selected: Hsla,
-    pub text: Hsla,
-    pub text_muted: Hsla,
-    pub accent: Hsla,
-    pub accent_text: Hsla,
-    #[allow(dead_code)]
-    pub success: Hsla,
-    pub danger: Hsla,
-}
+/// Call after `gpui_kit::init`.
+pub fn init(cx: &mut App) {
+    if let Err(err) = ThemeRegistry::global_mut(cx).load_themes_from_str(THEMES) {
+        eprintln!("failed to parse embedded themes: {err:#}");
+    }
+    select_workdesk_themes(cx);
+    let settings: Settings = storage::load(SETTINGS_FILE);
+    Theme::change(settings.appearance.mode(), None, cx);
 
-impl Global for Theme {}
-
-impl Theme {
-    pub fn dark() -> Self {
-        Self {
-            appearance: Appearance::Dark,
-            background: rgb(0x1e1f22).into(),
-            surface: rgb(0x26282c).into(),
-            sidebar: rgb(0x18191c).into(),
-            border: rgb(0x34363c).into(),
-            hover: rgb(0x2e3035).into(),
-            selected: rgb(0x35373c).into(),
-            text: rgb(0xe6e6e8).into(),
-            text_muted: rgb(0x8b8e96).into(),
-            accent: rgb(0x4f8cff).into(),
-            accent_text: rgb(0xffffff).into(),
-            success: rgb(0x22c55e).into(),
-            danger: rgb(0xef4444).into(),
+    #[cfg(debug_assertions)]
+    {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("themes");
+        let watched = ThemeRegistry::watch_dir(dir, cx, |cx| {
+            select_workdesk_themes(cx);
+            Theme::change(Appearance::current(cx).mode(), None, cx);
+        });
+        if let Err(err) = watched {
+            eprintln!("theme hot reload disabled: {err:#}");
         }
-    }
-
-    pub fn light() -> Self {
-        Self {
-            appearance: Appearance::Light,
-            background: rgb(0xffffff).into(),
-            surface: rgb(0xf6f7f9).into(),
-            sidebar: rgb(0xeef0f3).into(),
-            border: rgb(0xe1e4e8).into(),
-            hover: rgb(0xe9ecef).into(),
-            selected: rgb(0xdde3ee).into(),
-            text: rgb(0x1f2328).into(),
-            text_muted: rgb(0x6e7781).into(),
-            accent: rgb(0x2563eb).into(),
-            accent_text: rgb(0xffffff).into(),
-            success: rgb(0x16a34a).into(),
-            danger: rgb(0xdc2626).into(),
-        }
-    }
-
-    fn for_appearance(appearance: Appearance) -> Self {
-        match appearance {
-            Appearance::Light => Self::light(),
-            Appearance::Dark => Self::dark(),
-        }
-    }
-
-    pub fn init(cx: &mut App) {
-        let settings: Settings = storage::load(SETTINGS_FILE);
-        cx.set_global(Self::for_appearance(settings.appearance));
-    }
-
-    pub fn set(appearance: Appearance, cx: &mut App) {
-        cx.set_global(Self::for_appearance(appearance));
-        cx.refresh_windows();
-        if let Err(err) = storage::save(SETTINGS_FILE, &Settings { appearance }) {
-            eprintln!("failed to save settings: {err:#}");
-        }
-    }
-
-    pub fn toggle(cx: &mut App) {
-        let next = match cx.theme().appearance {
-            Appearance::Light => Appearance::Dark,
-            Appearance::Dark => Appearance::Light,
-        };
-        Self::set(next, cx);
     }
 }
 
-/// Lets any context read the theme as `cx.theme()`.
-pub trait ActiveTheme {
-    fn theme(&self) -> &Theme;
+fn select_workdesk_themes(cx: &mut App) {
+    let registry = ThemeRegistry::global(cx);
+    let find = |name: &str| registry.themes().get(&SharedString::from(name)).cloned();
+    let (light, dark) = (find(LIGHT), find(DARK));
+    let theme = Theme::global_mut(cx);
+    if let Some(light) = light {
+        theme.light_theme = light;
+    }
+    if let Some(dark) = dark {
+        theme.dark_theme = dark;
+    }
 }
 
-impl ActiveTheme for App {
-    fn theme(&self) -> &Theme {
-        self.global::<Theme>()
+pub fn set(appearance: Appearance, cx: &mut App) {
+    Theme::change(appearance.mode(), None, cx);
+    if let Err(err) = storage::save(SETTINGS_FILE, &Settings { appearance }) {
+        eprintln!("failed to save settings: {err:#}");
     }
+}
+
+pub fn toggle(cx: &mut App) {
+    let next = match Appearance::current(cx) {
+        Appearance::Light => Appearance::Dark,
+        Appearance::Dark => Appearance::Light,
+    };
+    set(next, cx);
 }

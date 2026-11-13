@@ -1,6 +1,6 @@
 # AGENTS.md — Workdesk
 
-Personal macOS desktop app (Rust + [GPUI](https://gpui.rs/) 0.2.2 from crates.io). User-facing features, shortcuts, data files → [README.md](README.md). This file: how to change the code safely.
+Personal macOS desktop app (Rust + [GPUI Kit](https://gpui-kit.com) `=0.9.1`, which re-exports its pinned GPUI fork `gpui-pre 0.3.12`). User-facing features, shortcuts, data files → [README.md](README.md). This file: how to change the code safely.
 
 ## Commands
 
@@ -10,6 +10,7 @@ Personal macOS desktop app (Rust + [GPUI](https://gpui.rs/) 0.2.2 from crates.io
 | Tests | `cargo test` |
 | Format | `cargo fmt` (run before committing) |
 | Run dev, throwaway data | `WORKDESK_DATA_DIR=/tmp/wd cargo run` |
+| Dev loop (rebuild + relaunch on save) | `make dev` (`bacon.toml`, data in `/tmp/workdesk-dev`); theme JSON edits apply live without restart |
 | Ship to user | `make install` → rebuilds release, replaces `~/Applications/Workdesk.app` (deletes stale `/Applications` copy), relaunches |
 | Regenerate icon | `make icon` (edits `scripts/make_icon.swift` first) |
 
@@ -25,22 +26,24 @@ Done = `cargo fmt` + `cargo build` with **zero warnings** + `cargo test` green. 
 ## Architecture
 
 ```
-main.rs        Application setup, window, Dock reopen
-actions.rs     actions!(), key bindings, menu bar
+main.rs        gpui_kit::application(), gpui_kit::open_window (wraps view in kit Root), Dock reopen
+actions.rs     actions!(), key bindings (bind()), menu bar
 storage.rs     load/save JSON in data_dir()
-theme.rs       Theme global + persisted Appearance
-workspace.rs   root view: sidebar | active page | status bar; owns Entity<TaskStore>
+theme.rs       persisted Appearance → kit Theme; loads themes/workdesk.json (watched in debug)
+workspace.rs   root view: kit Sidebar | active page | status bar; owns Entity<TaskStore>
 tasks/         model.rs (Task, Category, Priority, TaskData, parse_quick_add) · store.rs (TaskStore entity)
 pages/         one Render view per sidebar page; Page enum lists them
-components/    stateless RenderOnce/fn helpers + TextInput entity
+components/    thin fn wrappers over kit components (chip, icon_button, category_tag, card) + icon Assets
 ```
 
 - **State**: one `Entity<TaskStore>` created in `Workspace::new`, cloned into pages. Pages `cx.observe(&store, …)` to re-render. All mutations go through `TaskStore` methods, which end in `commit()` (save + `cx.notify()`). Never mutate task data elsewhere.
 - **New page**: steps in README "Add a page". New feature with its own data → own module like `tasks/` with its own JSON file via `storage::{load, save}`.
-- **Theme**: read colors via `cx.theme()` (`ActiveTheme` trait). No hard-coded colors in views except data-driven ones (priority/category hex in `tasks/model.rs`).
-- **Style**: flat — no borders/shadows on surfaces; `rounded_2xl` cards, `rounded_xl` rows, `rounded_full` buttons/chips/inputs.
-- **Icons**: `components::icon(IconName, color)` — never text glyphs. New icon: 24px stroke SVG in `assets/icons/` + `IconName` variant + `ICONS` entry. `svg()` doesn't inherit text color; always pass one.
-- **Text entry**: `components::TextInput` (single-line). Subscribe to `TextInputEvent::{Submit, Cancel}`; use `text()`, `set_text()`, `clear()`. Its key bindings are scoped to the `"TextInput"` context in `text_input::init`.
+- **Imports**: `gpui_kit::*` is GPUI; components under `gpui_kit::component::*`; never add `gpui` as a direct dependency.
+- **Components**: use kit ones (`Button`, `Checkbox`, `Input`, `TabBar`, `Tag`, `Sidebar`, `Icon`, `h_flex`/`v_flex`, tooltips…) before hand-rolling. Kit source: `~/.cargo/registry/src/*/gpui-component-0.9.1/src`.
+- **Theme**: colors via `cx.theme()` (`gpui_kit::component::ActiveTheme`); our mapping: `group_box` = card/surface, `secondary` = row hover, `secondary_active` = selected, `primary` = accent, `muted_foreground` = secondary text. Change the palette in `themes/workdesk.json`, not in code. No hard-coded colors in views except data-driven ones (priority/category hex in `tasks/model.rs`). Don't mark our themes `is_default` (breaks hot reload).
+- **Style**: flat — no borders/shadows on surfaces (`"shadow": false` in theme); `rounded_2xl` cards, `rounded_xl` rows, pill (`ButtonRounded::Size(px(999.))`) buttons/chips.
+- **Icons**: `Icon::new(gpui_kit::assets::IconName::X).text_color(c)` — never text glyphs. Kit embeds ~100 component icons; any other Lucide icon must be added to `icon_assets!` in `components/assets.rs` (+ the test list) or it renders blank.
+- **Text entry**: `Entity<InputState>` (`InputState::new(window, cx).placeholder(..)`) rendered with `Input::new(&state)`. `cx.subscribe_in(&state, window, …)` for `InputEvent::PressEnter`; `value()`, `set_value(text, window, cx)`. Esc propagates as `component::input::Escape` — handle with `.on_action` on a parent.
 
 ## Persistence rules
 
@@ -49,13 +52,17 @@ components/    stateless RenderOnce/fn helpers + TextInput entity
 - `storage::load` quarantines unparseable files; don't replace that with a silent default.
 - Never touch the user's real data dir in tests or manual checks — always set `WORKDESK_DATA_DIR`.
 
-## GPUI 0.2.2 gotchas
+## GPUI (gpui-pre 0.3.12) / kit gotchas
 
-API source of truth: `~/.cargo/registry/src/*/gpui-0.2.2/{src,examples}`. Docs online often describe newer Zed-internal APIs — verify there before using.
+API source of truth: `~/.cargo/registry/src/*/{gpui-pre-0.3.12,gpui-base-0.9.1,gpui-component-0.9.1}/src`. Online docs track newer versions — verify there before using.
 
 | Gotcha | Fix |
 |---|---|
-| macOS build needs full Xcode `metal` | `runtime_shaders` feature already enabled in `Cargo.toml`; keep it |
+| Upgrading gpui-kit | bumps the pinned GPUI too; expect API breaks, do it as its own change |
+| `KeyBinding::new("secondary-…")` panics at startup | use `actions::bind` (`KeyBinding::load` resolves `secondary` per OS) |
+| Focus during window construction is dropped | `cx.defer_in(window, …)` (see `Workspace::new`) |
+| `FocusHandle::focus` / `InputState::set_value` need `window, cx` | thread `window` through; subscribe with `subscribe_in` |
+| macOS build needs full Xcode `metal` | not needed: gpui-kit enables `runtime_shaders` |
 | `on_reopen` isn't on `App` | call on `Application` before `.run()` (see `main.rs`) |
 | Closure in `.map()` needs `cx` → "captured variable cannot escape `FnMut`" | take `cx: &Context<Self>` (not `&mut`) in render helpers; `cx.listener` only needs `&` |
 | Borrow conflict reading theme then calling `cx.listener` | `let theme = cx.theme().clone();` at top of render |
@@ -67,13 +74,14 @@ API source of truth: `~/.cargo/registry/src/*/gpui-0.2.2/{src,examples}`. Docs o
 
 ## Verifying UI
 
-- Screenshots (`screencapture`) fail: no screen-recording permission. Ask the user to eyeball visual changes.
+- Screenshots (`screencapture`) fail: no screen-recording permission, and the window exposes no AX tree. Ask the user to eyeball visual changes.
+- Quick check without bundling: run `WORKDESK_DATA_DIR=/tmp/wd ./target/debug/workdesk` as a background shell (block 0), then use the frontmost-guarded keystrokes below.
 - Keystroke automation via `osascript`/System Events works but types into **whatever app is frontmost** — the user is often working. Only send keys after asserting the frontmost process is `workdesk`; abort otherwise. Prefer AX actions that don't need focus (e.g. clicking the window close button by subrole `AXCloseButton`).
 - Launch for tests with `open --env WORKDESK_DATA_DIR=/tmp/wd --stderr /tmp/wd.log target/release/Workdesk.app` (a backgrounded binary from the agent shell is killed when the command ends). Check results by reading `/tmp/wd/tasks.json`.
 - Quit with `osascript -e 'tell application id "com.workdesk.desktop" to quit'`. Clean up `/tmp/wd*` after.
 
 ## Don't
 
-- Don't add a UI component library (e.g. gpui-component) or switch GPUI to a git dependency without asking — version coupling is fragile.
+- Don't add other UI libraries alongside gpui-kit, a direct `gpui` dependency, or git dependencies without asking — they must match the kit's pinned GPUI.
 - Don't edit `Cargo.lock` by hand; don't commit `target/`.
 - Don't add clutter: the user explicitly wants a minimal UI. Secondary actions go on hover, not always-visible.

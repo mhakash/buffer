@@ -1,6 +1,7 @@
 # Workdesk
 
-Desktop app for custom work tooling, built on [GPUI](https://gpui.rs/) (Zed's UI framework).
+Desktop app for custom work tooling, built on [GPUI](https://gpui.rs/) (Zed's UI framework) via
+[GPUI Kit](https://gpui-kit.com) (GPUI + ready-made components, Lucide icons, JSON themes).
 First feature: a task list with categories, priorities and a done log.
 
 ## Install / update
@@ -18,13 +19,17 @@ so there's only ever one copy (two copies = two Dock icons).
 ## Develop
 
 ```sh
-make run         # cargo run (debug)
+make dev         # rebuild + relaunch on every save, throwaway data in /tmp/workdesk-dev (brew install bacon)
+make run         # cargo run (debug, your real data)
 make test        # unit tests
 make icon        # regenerate assets/AppIcon.icns from scripts/make_icon.swift
 WORKDESK_DATA_DIR=/tmp/wd cargo run   # use throwaway data
 ```
 
-macOS needs only Xcode Command Line Tools: the `runtime_shaders` feature (see `Cargo.toml`) compiles Metal shaders at startup instead of requiring the full Xcode `metal` compiler.
+Colors, radius and fonts live in `themes/workdesk.json` (gpui-kit theme format). In debug builds the
+running app reloads them on save, no rebuild needed; release builds embed the file.
+
+macOS needs only Xcode Command Line Tools: gpui-kit enables GPUI's `runtime_shaders`, which compiles Metal shaders at startup instead of requiring the full Xcode `metal` compiler.
 
 Bump `version` in `Cargo.toml` with each feature; it shows in the status bar and the app's Info.plist.
 
@@ -52,7 +57,7 @@ Type in the composer and press Enter. Inline tokens (anywhere in the text):
 
 Without tokens, the priority/category chips under the input apply. Hover a task for actions:
 drag the handle to reorder within a priority group (preview while dragging; saved on release), cycle priority, edit, delete (with Undo).
-Click the circle to complete; Done groups by day.
+Tick the checkbox to complete; Done groups by day.
 
 ## Shortcuts
 
@@ -71,11 +76,13 @@ Click the circle to complete; Done groups by day.
 | `src/main.rs` | App entry, window, Dock reopen |
 | `src/actions.rs` | Actions, key bindings, menu bar |
 | `src/storage.rs` | JSON load/save in the data dir |
-| `src/theme.rs` | Light/dark `Theme` global (`cx.theme()`), persisted |
+| `src/theme.rs` | Light/dark appearance (persisted) over gpui-kit's `Theme`; loads `themes/` |
+| `themes/workdesk.json` | Light + dark palettes (hot-reloaded in debug builds) |
 | `src/workspace.rs` | Root view: sidebar, page content, status bar |
 | `src/tasks/` | Task model, quick-add parser, `TaskStore` entity |
 | `src/pages/` | One file per page; `Page` enum drives the sidebar |
-| `src/components/` | `Button`, `card`, `chip`, `icon` / `icon_button` (SVGs in `assets/icons/`, embedded), `TextInput` |
+| `src/components/` | Thin wrappers over gpui-kit (`chip`, `icon_button`, `category_tag`, `card`) + icon `Assets` |
+| `bacon.toml` | `make dev` rebuild/relaunch job |
 | `scripts/` | Icon generation, `.app` bundling, install |
 
 ## Add a page
@@ -87,5 +94,6 @@ Click the circle to complete; Done groups by day.
 
 ## References
 
+- [GPUI Kit docs](https://gpui-kit.com) · [repo](https://github.com/longbridge/gpui-kit)
 - [GPUI README](https://github.com/zed-industries/zed/tree/main/crates/gpui) · [examples](https://github.com/zed-industries/zed/tree/main/crates/gpui/examples)
-- [gpui-component](https://github.com/longbridge/gpui-component): optional ready-made widgets
+- [Lucide icons](https://lucide.dev/icons) (names map to `gpui_kit::assets::IconName`)

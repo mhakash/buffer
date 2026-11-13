@@ -1,17 +1,22 @@
 //! Root view of the main window: sidebar navigation, page content and status bar.
 
-use gpui::{
+use gpui_kit::component::{
+    ActiveTheme, h_flex,
+    sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
+    v_flex,
+};
+use gpui_kit::{
     AnyView, Context, Entity, FocusHandle, FontWeight, Subscription, Window, div, prelude::*, px,
 };
 
 use crate::{
     APP_NAME,
     actions::{CloseWindow, NewTask, ShowSettings, ShowTasks},
-    components::icon,
+    components::category_tag,
     pages::{Page, SettingsPage, TasksPage},
     storage,
     tasks::TaskStore,
-    theme::{ActiveTheme, Appearance},
+    theme::Appearance,
 };
 
 pub struct Workspace {
@@ -26,9 +31,12 @@ pub struct Workspace {
 impl Workspace {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let store = cx.new(TaskStore::load);
-        let tasks = cx.new(|cx| TasksPage::new(store.clone(), cx));
-        let settings = cx.new(|cx| SettingsPage::new(store.clone(), cx));
-        tasks.read(cx).focus_composer(window, cx);
+        let tasks = cx.new(|cx| TasksPage::new(store.clone(), window, cx));
+        let settings = cx.new(|cx| SettingsPage::new(store.clone(), window, cx));
+        // Focusing during window construction is dropped; wait until the window exists.
+        cx.defer_in(window, |this, window, cx| {
+            this.navigate(Page::Tasks, window, cx)
+        });
 
         Self {
             focus_handle: cx.focus_handle(),
@@ -43,8 +51,10 @@ impl Workspace {
     fn navigate(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
         self.active = page;
         match page {
-            Page::Tasks => self.tasks.read(cx).focus_composer(window, cx),
-            Page::Settings => self.focus_handle.focus(window),
+            Page::Tasks => self
+                .tasks
+                .update(cx, |tasks, cx| tasks.focus_composer(window, cx)),
+            Page::Settings => self.focus_handle.focus(window, cx),
         }
         cx.notify();
     }
@@ -57,84 +67,47 @@ impl Workspace {
     }
 
     fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme().clone();
         let open = self.store.read(cx).open_count();
+        let accent = cx.theme().primary;
 
-        div()
-            .flex()
-            .flex_col()
+        Sidebar::new("sidebar")
             .w(px(200.))
-            .h_full()
-            .flex_none()
-            .bg(theme.sidebar)
-            .p_3()
-            .gap_1()
-            .child(
+            .header(
                 div()
                     .px_2()
-                    .py_3()
+                    .py_1()
                     .text_lg()
                     .font_weight(FontWeight::BOLD)
-                    .text_color(theme.text)
                     .child(APP_NAME),
             )
-            .children(Page::ALL.into_iter().map(|page| {
-                let selected = page == self.active;
-                let badge = (page == Page::Tasks && open > 0).then(|| open.to_string());
-                let color = if selected {
-                    theme.text
-                } else {
-                    theme.text_muted
-                };
-                div()
-                    .id(page.label())
-                    .flex()
-                    .items_center()
-                    .gap_2p5()
-                    .px_3()
-                    .py_2()
-                    .rounded_xl()
-                    .text_sm()
-                    .cursor_pointer()
-                    .text_color(color)
-                    .when(selected, |this| this.bg(theme.selected))
-                    .hover(|s| s.bg(theme.hover).text_color(theme.text))
-                    .on_click(
-                        cx.listener(move |this, _, window, cx| this.navigate(page, window, cx)),
-                    )
-                    .child(icon(page.icon(), color))
-                    .child(div().flex_1().child(page.label()))
-                    .when_some(badge, |this, badge| {
-                        this.child(
-                            div()
-                                .px_2()
-                                .rounded_full()
-                                .bg(theme.accent.opacity(0.2))
-                                .text_xs()
-                                .text_color(theme.accent)
-                                .child(badge),
+            .child(
+                SidebarMenu::new().children(Page::ALL.into_iter().map(|page| {
+                    let badge = (page == Page::Tasks && open > 0).then(|| open.to_string());
+                    SidebarMenuItem::new(page.label())
+                        .icon(page.icon())
+                        .active(page == self.active)
+                        .on_click(
+                            cx.listener(move |this, _, window, cx| this.navigate(page, window, cx)),
                         )
-                    })
-            }))
+                        .when_some(badge, |this, badge| {
+                            this.suffix(move |_, _| category_tag(badge.clone(), accent))
+                        })
+                })),
+            )
     }
 
     fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
-        let appearance = match theme.appearance {
-            Appearance::Light => "Light",
-            Appearance::Dark => "Dark",
-        };
+        let appearance = Appearance::current(cx).label();
 
-        div()
-            .flex()
+        h_flex()
             .flex_none()
             .justify_between()
-            .items_center()
             .h_6()
             .px_3()
-            .bg(theme.sidebar)
+            .bg(theme.status_bar)
             .text_xs()
-            .text_color(theme.text_muted)
+            .text_color(theme.muted_foreground)
             .child(format!("{APP_NAME} v{}", env!("CARGO_PKG_VERSION")))
             .child(format!(
                 "⌘N new task  ·  ⌘⇧T theme ({appearance})  ·  data: {}",
@@ -147,7 +120,7 @@ impl Render for Workspace {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
 
-        div()
+        v_flex()
             .id("workspace")
             .track_focus(&self.focus_handle)
             .on_action(
@@ -163,11 +136,9 @@ impl Render for Workspace {
             }))
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
             .size_full()
-            .flex()
-            .flex_col()
             .bg(theme.background)
-            .text_color(theme.text)
-            .font_family(".SystemUIFont")
+            .text_color(theme.foreground)
+            .font_family(theme.font_family.clone())
             .child(
                 div()
                     .flex()

@@ -1,0 +1,13 @@
+# `make dev`: rebuild and relaunch the app on every source change, against throwaway data.
+# Theme colors (`themes/*.json`) reload live in debug builds without a restart.
+default_job = "dev"
+
+[jobs.dev]
+command = ["cargo", "run"]
+env.WORKDESK_DATA_DIR = "/tmp/workdesk-dev"
+need_stdout = true
+allow_warnings = true
+background = false
+on_change_strategy = "kill_then_restart"
+# Kill the app spawned by `cargo run`, not just cargo, so windows don't pile up.
+kill = ["pkill", "-TERM", "-P"]

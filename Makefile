@@ -1,7 +1,11 @@
-.PHONY: run test bundle install icon
+.PHONY: run dev test bundle install icon
 
 run:
 	cargo run
+
+# Rebuild + relaunch on save (throwaway data in /tmp/workdesk-dev). Needs `brew install bacon`.
+dev:
+	bacon dev
 
 test:
 	cargo test

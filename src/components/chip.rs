@@ -1,60 +1,54 @@
-use gpui::{App, Div, ElementId, Hsla, SharedString, Stateful, div, prelude::*};
+use gpui_kit::{
+    ElementId, Hsla, ParentElement, SharedString, Styled, div, prelude::FluentBuilder, px,
+};
+use gpui_kit::{
+    assets::IconName,
+    component::{
+        Icon, Selectable, Sizable,
+        button::{Button, ButtonRounded, ButtonVariants},
+        tag::Tag,
+    },
+};
 
-use super::{IconName, icon};
-use crate::theme::ActiveTheme;
+const PILL: ButtonRounded = ButtonRounded::Size(px(999.));
 
-/// Flat, clickable pill with an optional colored dot.
+/// Flat, selectable pill with an optional colored dot.
 pub fn chip(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
     dot: Option<Hsla>,
     selected: bool,
-    cx: &App,
-) -> Stateful<Div> {
-    let theme = cx.theme();
-    let hover = theme.hover;
-    div()
-        .id(id)
-        .flex()
-        .flex_none()
-        .items_center()
-        .gap_1p5()
-        .px_3()
-        .py_1()
-        .rounded_full()
-        .text_xs()
-        .cursor_pointer()
-        .map(|this| {
-            if selected {
-                this.bg(theme.selected).text_color(theme.text)
-            } else {
-                this.text_color(theme.text_muted)
-                    .hover(move |s| s.bg(hover))
-            }
-        })
+) -> Button {
+    Button::new(id)
+        .ghost()
+        .small()
+        .rounded(PILL)
+        .selected(selected)
         .when_some(dot, |this, color| {
             this.child(div().size_2().rounded_full().bg(color))
         })
         .child(label.into())
 }
 
-/// Round, icon-only button for row actions.
+/// Round, icon-only ghost button for row actions.
 pub fn icon_button(
     id: impl Into<ElementId>,
     name: IconName,
     color: Hsla,
-    cx: &App,
-) -> Stateful<Div> {
-    let hover = cx.theme().hover;
-    div()
-        .id(id)
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .size_7()
+    tooltip: impl Into<SharedString>,
+) -> Button {
+    Button::new(id)
+        .ghost()
+        .small()
+        .rounded(PILL)
+        .icon(Icon::new(name).text_color(color))
+        .tooltip(tooltip)
+}
+
+/// Tinted, non-interactive pill for a category or status (data-driven `color`).
+pub fn category_tag(label: impl Into<SharedString>, color: Hsla) -> Tag {
+    let bg = color.opacity(0.15);
+    Tag::custom(bg, color, bg)
         .rounded_full()
-        .cursor_pointer()
-        .hover(move |s| s.bg(hover))
-        .child(icon(name, color).size_3p5())
+        .child(label.into())
 }

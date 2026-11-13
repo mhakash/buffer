@@ -1,8 +1,8 @@
 //! App-wide actions, key bindings and the native menu bar.
 
-use gpui::{App, KeyBinding, Menu, MenuItem, SystemMenuType, actions};
+use gpui_kit::{Action, App, KeyBinding, Menu, MenuItem, SystemMenuType, actions};
 
-use crate::{APP_NAME, theme::Theme};
+use crate::{APP_NAME, theme};
 
 actions!(
     workdesk,
@@ -17,46 +17,43 @@ actions!(
 );
 
 pub fn init(cx: &mut App) {
-    // `secondary` is cmd on macOS and ctrl on Linux/Windows.
-    cx.bind_keys([
-        KeyBinding::new("secondary-q", Quit, None),
-        KeyBinding::new("secondary-w", CloseWindow, None),
-        KeyBinding::new("secondary-shift-t", ToggleTheme, None),
-        KeyBinding::new("secondary-n", NewTask, None),
-        KeyBinding::new("secondary-1", ShowTasks, None),
-        KeyBinding::new("secondary-,", ShowSettings, None),
-    ]);
+    let bindings = [
+        bind("secondary-q", Quit, cx),
+        bind("secondary-w", CloseWindow, cx),
+        bind("secondary-shift-t", ToggleTheme, cx),
+        bind("secondary-n", NewTask, cx),
+        bind("secondary-1", ShowTasks, cx),
+        bind("secondary-,", ShowSettings, cx),
+    ];
+    cx.bind_keys(bindings);
 
     cx.on_action(|_: &Quit, cx| cx.quit());
-    cx.on_action(|_: &ToggleTheme, cx| Theme::toggle(cx));
+    cx.on_action(|_: &ToggleTheme, cx| theme::toggle(cx));
 
     cx.set_menus(vec![
-        Menu {
-            name: APP_NAME.into(),
-            items: vec![
-                MenuItem::action("Settings…", ShowSettings),
-                MenuItem::separator(),
-                MenuItem::os_submenu("Services", SystemMenuType::Services),
-                MenuItem::separator(),
-                MenuItem::action(format!("Quit {APP_NAME}"), Quit),
-            ],
-        },
-        Menu {
-            name: "File".into(),
-            items: vec![
-                MenuItem::action("New Task", NewTask),
-                MenuItem::separator(),
-                MenuItem::action("Close Window", CloseWindow),
-            ],
-        },
-        Menu {
-            name: "View".into(),
-            items: vec![
-                MenuItem::action("Tasks", ShowTasks),
-                MenuItem::action("Settings", ShowSettings),
-                MenuItem::separator(),
-                MenuItem::action("Toggle Light/Dark", ToggleTheme),
-            ],
-        },
+        Menu::new(APP_NAME).items([
+            MenuItem::action("Settings…", ShowSettings),
+            MenuItem::separator(),
+            MenuItem::os_submenu("Services", SystemMenuType::Services),
+            MenuItem::separator(),
+            MenuItem::action(format!("Quit {APP_NAME}"), Quit),
+        ]),
+        Menu::new("File").items([
+            MenuItem::action("New Task", NewTask),
+            MenuItem::separator(),
+            MenuItem::action("Close Window", CloseWindow),
+        ]),
+        Menu::new("View").items([
+            MenuItem::action("Tasks", ShowTasks),
+            MenuItem::action("Settings", ShowSettings),
+            MenuItem::separator(),
+            MenuItem::action("Toggle Light/Dark", ToggleTheme),
+        ]),
     ]);
+}
+
+/// Global binding; `secondary` is cmd on macOS and ctrl elsewhere, which only `load` resolves.
+fn bind(keys: &str, action: impl Action, cx: &App) -> KeyBinding {
+    KeyBinding::load(keys, Box::new(action), None, false, None, cx)
+        .unwrap_or_else(|err| panic!("invalid key binding {keys}: {err:?}"))
 }

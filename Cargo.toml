@@ -1,22 +1,20 @@
 [package]
 name = "workdesk"
-version = "0.3.5"
+version = "0.4.0"
 edition = "2024"
 description = "Desktop app for work tooling, built on GPUI"
 publish = false
 
 [dependencies]
-gpui = "0.2.2"
+# Re-exports GPUI (`gpui_kit::*`) and pins its own GPUI fork; never add `gpui` directly.
+# Upgrade deliberately: each kit release moves the pinned GPUI and may break APIs.
+# Enables `runtime_shaders`, so macOS builds need only the Xcode Command Line Tools.
+gpui-kit = "=0.9.1"
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-unicode-segmentation = "1"
-
-# Compile Metal shaders at runtime so the build only needs Xcode Command Line Tools, not full Xcode.
-[target.'cfg(target_os = "macos")'.dependencies]
-gpui = { version = "0.2.2", features = ["runtime_shaders"] }
 
 [profile.dev]
 # GPUI is slow unoptimized; optimize dependencies while keeping our crate fast to rebuild.

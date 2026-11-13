@@ -6,16 +6,14 @@ mod tasks;
 mod theme;
 mod workspace;
 
-use gpui::{
-    App, AppContext, Application, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size,
-};
+use gpui_kit::{App, AppContext, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size};
 
-use crate::{theme::Theme, workspace::Workspace};
+use crate::workspace::Workspace;
 
 pub const APP_NAME: &str = "Workdesk";
 
 fn main() {
-    let app = Application::new().with_assets(components::Assets);
+    let app = gpui_kit::application().with_assets(components::Assets);
     // macOS convention: closing the window keeps the app in the Dock; clicking the Dock icon reopens it.
     app.on_reopen(|cx| {
         if cx.windows().is_empty() {
@@ -24,12 +22,12 @@ fn main() {
     });
 
     app.run(|cx: &mut App| {
-        Theme::init(cx);
+        gpui_kit::init(cx);
+        theme::init(cx);
         actions::init(cx);
-        components::text_input::init(cx);
 
         if !cfg!(target_os = "macos") {
-            cx.on_window_closed(|cx| {
+            cx.on_window_closed(|cx, _| {
                 if cx.windows().is_empty() {
                     cx.quit();
                 }
@@ -44,7 +42,7 @@ fn main() {
 
 fn open_main_window(cx: &mut App) {
     let bounds = Bounds::centered(None, size(px(1000.), px(760.)), cx);
-    let result = cx.open_window(
+    let result = gpui_kit::open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(720.), px(480.))),
@@ -54,6 +52,7 @@ fn open_main_window(cx: &mut App) {
             }),
             ..Default::default()
         },
+        cx,
         |window, cx| cx.new(|cx| Workspace::new(window, cx)),
     );
     if let Err(err) = result {

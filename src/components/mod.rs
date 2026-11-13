@@ -1,11 +1,9 @@
-mod button;
+//! Thin wrappers over gpui-kit components that pin the app's flat, rounded look.
+
+mod assets;
 mod card;
 mod chip;
-mod icon;
-pub mod text_input;
 
-pub use button::{Button, ButtonVariant};
+pub use assets::Assets;
 pub use card::card;
-pub use chip::{chip, icon_button};
-pub use icon::{Assets, IconName, icon};
-pub use text_input::{TextInput, TextInputEvent};
+pub use chip::{category_tag, chip, icon_button};

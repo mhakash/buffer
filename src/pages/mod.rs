@@ -1,7 +1,7 @@
 mod settings;
 mod tasks;
 
-use crate::components::IconName;
+use gpui_kit::assets::IconName;
 
 pub use settings::SettingsPage;
 pub use tasks::TasksPage;
@@ -25,7 +25,7 @@ impl Page {
 
     pub fn icon(self) -> IconName {
         match self {
-            Page::Tasks => IconName::Tasks,
+            Page::Tasks => IconName::ListTodo,
             Page::Settings => IconName::Settings,
         }
     }

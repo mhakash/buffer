@@ -1,32 +1,45 @@
-use gpui::{Context, Entity, FontWeight, Subscription, Window, div, prelude::*, px, rgb};
+use gpui_kit::assets::IconName;
+use gpui_kit::component::{
+    ActiveTheme, Sizable,
+    button::{Button, ButtonVariants},
+    h_flex,
+    input::{Input, InputEvent, InputState},
+    tab::{Tab, TabBar},
+    v_flex,
+};
+use gpui_kit::{Context, Entity, FontWeight, Subscription, Window, div, prelude::*, px, rgb};
 
 use crate::{
-    components::{Button, ButtonVariant, IconName, TextInput, TextInputEvent, card, icon_button},
+    components::{card, icon_button},
     storage,
     tasks::TaskStore,
-    theme::{ActiveTheme, Appearance, Theme},
+    theme::{self, Appearance},
 };
+
+const APPEARANCES: [Appearance; 2] = [Appearance::Light, Appearance::Dark];
 
 pub struct SettingsPage {
     store: Entity<TaskStore>,
-    category_input: Entity<TextInput>,
+    category_input: Entity<InputState>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl SettingsPage {
-    pub fn new(store: Entity<TaskStore>, cx: &mut Context<Self>) -> Self {
-        let category_input = cx.new(|cx| TextInput::new("New category name, then Enter", cx));
+    pub fn new(store: Entity<TaskStore>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let category_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("New category name, then Enter"));
         let subscriptions = vec![
             cx.observe(&store, |_, _, cx| cx.notify()),
-            cx.subscribe(
+            cx.subscribe_in(
                 &category_input,
-                |this, input, event: &TextInputEvent, cx| {
-                    if let TextInputEvent::Submit = event {
-                        let name = input.read(cx).text().to_string();
+                window,
+                |this, input, event: &InputEvent, window, cx| {
+                    if let InputEvent::PressEnter { .. } = event {
+                        let name = input.read(cx).value().to_string();
                         this.store
                             .update(cx, |store, cx| store.ensure_category(&name, cx));
+                        input.update(cx, |input, cx| input.set_value("", window, cx));
                     }
-                    input.update(cx, |input, cx| input.clear(cx));
                 },
             ),
         ];
@@ -63,14 +76,12 @@ impl SettingsPage {
             .child(
                 div()
                     .text_xs()
-                    .text_color(theme.text_muted)
+                    .text_color(theme.muted_foreground)
                     .child("Click a color dot to change it. Deleting a category keeps its tasks."),
             )
             .children(rows.into_iter().map(|(category, open, done)| {
                 let id = category.id;
-                div()
-                    .flex()
-                    .items_center()
+                h_flex()
                     .gap_3()
                     .py_1()
                     .child(
@@ -89,26 +100,30 @@ impl SettingsPage {
                     .child(
                         div()
                             .text_xs()
-                            .text_color(theme.text_muted)
+                            .text_color(theme.muted_foreground)
                             .child(format!("{open} open · {done} done")),
                     )
                     .child(
-                        icon_button(("category-delete", id), IconName::X, theme.danger, cx)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.store
-                                    .update(cx, |store, cx| store.delete_category(id, cx));
-                            })),
+                        icon_button(
+                            ("category-delete", id),
+                            IconName::X,
+                            theme.danger,
+                            "Delete category",
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.store
+                                .update(cx, |store, cx| store.delete_category(id, cx));
+                        })),
                     )
             }))
             .child(
                 div()
                     .mt_1()
-                    .px_4()
-                    .py_2()
+                    .px_2()
                     .rounded_full()
                     .bg(theme.background)
                     .text_sm()
-                    .child(self.category_input.clone()),
+                    .child(Input::new(&self.category_input).appearance(false)),
             )
     }
 }
@@ -116,18 +131,10 @@ impl SettingsPage {
 impl Render for SettingsPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let current = theme.appearance;
-        let appearance_button = |id: &'static str, label: &'static str, appearance: Appearance| {
-            Button::new(id, label)
-                .variant(ButtonVariant::Secondary)
-                .selected(current == appearance)
-                .on_click(move |_, _, cx| Theme::set(appearance, cx))
-        };
+        let current = Appearance::current(cx);
         let data_dir = storage::data_dir();
 
-        div()
-            .flex()
-            .flex_col()
+        v_flex()
             .gap_4()
             .max_w(px(640.))
             .child(
@@ -138,11 +145,16 @@ impl Render for SettingsPage {
             )
             .child(
                 card("Appearance", cx).child(
-                    div()
-                        .flex()
-                        .gap_2()
-                        .child(appearance_button("theme-light", "Light", Appearance::Light))
-                        .child(appearance_button("theme-dark", "Dark", Appearance::Dark)),
+                    h_flex().child(
+                        TabBar::new("appearance")
+                            .segmented()
+                            .small()
+                            .selected_index(
+                                APPEARANCES.iter().position(|a| *a == current).unwrap_or(0),
+                            )
+                            .children(APPEARANCES.map(|a| Tab::new().label(a.label())))
+                            .on_click(|ix, _, cx| theme::set(APPEARANCES[*ix], cx)),
+                    ),
                 ),
             )
             .child(self.render_categories(cx))
@@ -151,13 +163,15 @@ impl Render for SettingsPage {
                     .child(
                         div()
                             .text_xs()
-                            .text_color(theme.text_muted)
+                            .text_color(theme.muted_foreground)
                             .child(format!("Saved automatically to {}", data_dir.display())),
                     )
                     .child(
-                        div().flex().child(
-                            Button::new("reveal-data", "Show in Finder")
-                                .variant(ButtonVariant::Secondary)
+                        h_flex().child(
+                            Button::new("reveal-data")
+                                .secondary()
+                                .small()
+                                .label("Show in Finder")
                                 .on_click(move |_, _, cx| {
                                     let _ = std::fs::create_dir_all(&data_dir);
                                     cx.reveal_path(&data_dir.join("tasks.json"));

@@ -1,5 +1,5 @@
 use chrono::Utc;
-use gpui::{Context, SharedString};
+use gpui_kit::{Context, SharedString};
 
 use super::model::{CATEGORY_COLORS, Category, Id, Priority, Task, TaskData, category_key};
 use crate::storage;
