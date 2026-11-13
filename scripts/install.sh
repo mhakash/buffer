@@ -15,7 +15,7 @@ mkdir -p "$dest_dir"
 dest="$dest_dir/$APP_NAME.app"
 
 if pgrep -x "$BIN" >/dev/null; then
-  echo "quitting running $APP_NAME…"
+  echo "quitting running ${APP_NAME}…"
   osascript -e "tell application \"$APP_NAME\" to quit" >/dev/null 2>&1 || true
   for _ in $(seq 1 50); do pgrep -x "$BIN" >/dev/null || break; sleep 0.1; done
   pkill -x "$BIN" 2>/dev/null || true
