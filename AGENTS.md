@@ -10,7 +10,7 @@ Personal macOS desktop app (Rust + [GPUI](https://gpui.rs/) 0.2.2 from crates.io
 | Tests | `cargo test` |
 | Format | `cargo fmt` (run before committing) |
 | Run dev, throwaway data | `WORKDESK_DATA_DIR=/tmp/wd cargo run` |
-| Ship to user | `make install` → rebuilds release, replaces `/Applications/Workdesk.app`, relaunches |
+| Ship to user | `make install` → rebuilds release, replaces `~/Applications/Workdesk.app` (deletes stale `/Applications` copy), relaunches |
 | Regenerate icon | `make icon` (edits `scripts/make_icon.swift` first) |
 
 Done = `cargo fmt` + `cargo build` with **zero warnings** + `cargo test` green. Ignore the `block`/`proc-macro-error2` future-incompat note (upstream).

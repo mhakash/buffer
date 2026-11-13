@@ -6,13 +6,14 @@ First feature: a task list with categories, priorities and a done log.
 ## Install / update
 
 ```sh
-make install     # builds release, installs /Applications/Workdesk.app, relaunches it
+make install     # builds release, installs ~/Applications/Workdesk.app, relaunches it
 ```
 
 Re-run `make install` after any code change to update. The Dock pin and your data survive updates.
 Pin once: right-click the Dock icon → Options → Keep in Dock.
 
-Falls back to `~/Applications` if `/Applications` isn't writable.
+Always installs to `~/Applications` (no admin needed) and removes any old `/Applications/Workdesk.app`,
+so there's only ever one copy (two copies = two Dock icons).
 
 ## Develop
 
