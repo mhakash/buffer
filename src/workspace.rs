@@ -7,6 +7,7 @@ use gpui::{
 use crate::{
     APP_NAME,
     actions::{CloseWindow, NewTask, ShowSettings, ShowTasks},
+    components::icon,
     pages::{Page, SettingsPage, TasksPage},
     storage,
     tasks::TaskStore,
@@ -66,9 +67,7 @@ impl Workspace {
             .h_full()
             .flex_none()
             .bg(theme.sidebar)
-            .border_r_1()
-            .border_color(theme.border)
-            .p_2()
+            .p_3()
             .gap_1()
             .child(
                 div()
@@ -82,32 +81,33 @@ impl Workspace {
             .children(Page::ALL.into_iter().map(|page| {
                 let selected = page == self.active;
                 let badge = (page == Page::Tasks && open > 0).then(|| open.to_string());
+                let color = if selected {
+                    theme.text
+                } else {
+                    theme.text_muted
+                };
                 div()
                     .id(page.label())
                     .flex()
                     .items_center()
-                    .gap_2()
-                    .px_2()
-                    .py_1p5()
-                    .rounded_md()
+                    .gap_2p5()
+                    .px_3()
+                    .py_2()
+                    .rounded_xl()
                     .text_sm()
                     .cursor_pointer()
-                    .text_color(if selected {
-                        theme.text
-                    } else {
-                        theme.text_muted
-                    })
+                    .text_color(color)
                     .when(selected, |this| this.bg(theme.selected))
                     .hover(|s| s.bg(theme.hover).text_color(theme.text))
                     .on_click(
                         cx.listener(move |this, _, window, cx| this.navigate(page, window, cx)),
                     )
-                    .child(div().w_4().child(page.icon()))
+                    .child(icon(page.icon(), color))
                     .child(div().flex_1().child(page.label()))
                     .when_some(badge, |this, badge| {
                         this.child(
                             div()
-                                .px_1p5()
+                                .px_2()
                                 .rounded_full()
                                 .bg(theme.accent.opacity(0.2))
                                 .text_xs()
@@ -132,8 +132,6 @@ impl Workspace {
             .items_center()
             .h_6()
             .px_3()
-            .border_t_1()
-            .border_color(theme.border)
             .bg(theme.sidebar)
             .text_xs()
             .text_color(theme.text_muted)

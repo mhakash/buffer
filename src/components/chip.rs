@@ -1,8 +1,9 @@
 use gpui::{App, Div, ElementId, Hsla, SharedString, Stateful, div, prelude::*};
 
+use super::{IconName, icon};
 use crate::theme::ActiveTheme;
 
-/// Small rounded, clickable pill with an optional colored dot.
+/// Flat, clickable pill with an optional colored dot.
 pub fn chip(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
@@ -18,20 +19,16 @@ pub fn chip(
         .flex_none()
         .items_center()
         .gap_1p5()
-        .px_2p5()
-        .py_0p5()
+        .px_3()
+        .py_1()
         .rounded_full()
         .text_xs()
         .cursor_pointer()
-        .border_1()
         .map(|this| {
             if selected {
-                this.bg(theme.selected)
-                    .border_color(theme.border)
-                    .text_color(theme.text)
+                this.bg(theme.selected).text_color(theme.text)
             } else {
-                this.border_color(gpui::transparent_black())
-                    .text_color(theme.text_muted)
+                this.text_color(theme.text_muted)
                     .hover(move |s| s.bg(hover))
             }
         })
@@ -41,10 +38,10 @@ pub fn chip(
         .child(label.into())
 }
 
-/// Square, icon-only button (glyph text) for row actions.
+/// Round, icon-only button for row actions.
 pub fn icon_button(
     id: impl Into<ElementId>,
-    icon: &'static str,
+    name: IconName,
     color: Hsla,
     cx: &App,
 ) -> Stateful<Div> {
@@ -55,11 +52,9 @@ pub fn icon_button(
         .flex_none()
         .items_center()
         .justify_center()
-        .size_6()
-        .rounded_md()
-        .text_xs()
-        .text_color(color)
+        .size_7()
+        .rounded_full()
         .cursor_pointer()
         .hover(move |s| s.bg(hover))
-        .child(icon)
+        .child(icon(name, color).size_3p5())
 }

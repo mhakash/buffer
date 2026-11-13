@@ -15,7 +15,7 @@ use crate::{theme::Theme, workspace::Workspace};
 pub const APP_NAME: &str = "Workdesk";
 
 fn main() {
-    let app = Application::new();
+    let app = Application::new().with_assets(components::Assets);
     // macOS convention: closing the window keeps the app in the Dock; clicking the Dock icon reopens it.
     app.on_reopen(|cx| {
         if cx.windows().is_empty() {

@@ -1,7 +1,7 @@
 use gpui::{Context, Entity, FontWeight, Subscription, Window, div, prelude::*, px, rgb};
 
 use crate::{
-    components::{Button, ButtonVariant, TextInput, TextInputEvent, card, icon_button},
+    components::{Button, ButtonVariant, IconName, TextInput, TextInputEvent, card, icon_button},
     storage,
     tasks::TaskStore,
     theme::{ActiveTheme, Appearance, Theme},
@@ -93,22 +93,19 @@ impl SettingsPage {
                             .child(format!("{open} open · {done} done")),
                     )
                     .child(
-                        icon_button(("category-delete", id), "✕", theme.danger, cx).on_click(
-                            cx.listener(move |this, _, _, cx| {
+                        icon_button(("category-delete", id), IconName::X, theme.danger, cx)
+                            .on_click(cx.listener(move |this, _, _, cx| {
                                 this.store
                                     .update(cx, |store, cx| store.delete_category(id, cx));
-                            }),
-                        ),
+                            })),
                     )
             }))
             .child(
                 div()
                     .mt_1()
-                    .px_3()
-                    .py_1p5()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(theme.border)
+                    .px_4()
+                    .py_2()
+                    .rounded_full()
                     .bg(theme.background)
                     .text_sm()
                     .child(self.category_input.clone()),

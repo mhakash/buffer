@@ -72,7 +72,7 @@ cycle priority (●), edit (✎), delete (✕, with Undo). Click the circle to c
 | `src/workspace.rs` | Root view: sidebar, page content, status bar |
 | `src/tasks/` | Task model, quick-add parser, `TaskStore` entity |
 | `src/pages/` | One file per page; `Page` enum drives the sidebar |
-| `src/components/` | `Button`, `card`, `chip`, `icon_button`, `TextInput` |
+| `src/components/` | `Button`, `card`, `chip`, `icon` / `icon_button` (SVGs in `assets/icons/`, embedded), `TextInput` |
 | `scripts/` | Icon generation, `.app` bundling, install |
 
 ## Add a page

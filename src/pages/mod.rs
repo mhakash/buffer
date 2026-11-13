@@ -1,6 +1,8 @@
 mod settings;
 mod tasks;
 
+use crate::components::IconName;
+
 pub use settings::SettingsPage;
 pub use tasks::TasksPage;
 
@@ -21,10 +23,10 @@ impl Page {
         }
     }
 
-    pub fn icon(self) -> &'static str {
+    pub fn icon(self) -> IconName {
         match self {
-            Page::Tasks => "✓",
-            Page::Settings => "⚙",
+            Page::Tasks => IconName::Tasks,
+            Page::Settings => IconName::Settings,
         }
     }
 }

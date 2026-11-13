@@ -53,13 +53,11 @@ impl Button {
 impl RenderOnce for Button {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.theme();
-        let (bg, fg, border) = match (self.variant, self.selected) {
-            (ButtonVariant::Primary, _) | (_, true) => {
-                (theme.accent, theme.accent_text, theme.accent)
-            }
-            (ButtonVariant::Secondary, _) => (theme.surface, theme.text, theme.border),
+        let (bg, fg) = match (self.variant, self.selected) {
+            (ButtonVariant::Primary, _) | (_, true) => (theme.accent, theme.accent_text),
+            (ButtonVariant::Secondary, _) => (theme.hover, theme.text),
         };
-        let hover = theme.hover;
+        let hover = theme.selected;
         let is_filled = self.variant == ButtonVariant::Primary || self.selected;
 
         div()
@@ -67,11 +65,9 @@ impl RenderOnce for Button {
             .flex()
             .items_center()
             .justify_center()
-            .px_3()
+            .px_4()
             .py_1()
-            .rounded_md()
-            .border_1()
-            .border_color(border)
+            .rounded_full()
             .bg(bg)
             .text_color(fg)
             .text_sm()

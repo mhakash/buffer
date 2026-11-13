@@ -38,6 +38,8 @@ components/    stateless RenderOnce/fn helpers + TextInput entity
 - **State**: one `Entity<TaskStore>` created in `Workspace::new`, cloned into pages. Pages `cx.observe(&store, …)` to re-render. All mutations go through `TaskStore` methods, which end in `commit()` (save + `cx.notify()`). Never mutate task data elsewhere.
 - **New page**: steps in README "Add a page". New feature with its own data → own module like `tasks/` with its own JSON file via `storage::{load, save}`.
 - **Theme**: read colors via `cx.theme()` (`ActiveTheme` trait). No hard-coded colors in views except data-driven ones (priority/category hex in `tasks/model.rs`).
+- **Style**: flat — no borders/shadows on surfaces; `rounded_2xl` cards, `rounded_xl` rows, `rounded_full` buttons/chips/inputs.
+- **Icons**: `components::icon(IconName, color)` — never text glyphs. New icon: 24px stroke SVG in `assets/icons/` + `IconName` variant + `ICONS` entry. `svg()` doesn't inherit text color; always pass one.
 - **Text entry**: `components::TextInput` (single-line). Subscribe to `TextInputEvent::{Submit, Cancel}`; use `text()`, `set_text()`, `clear()`. Its key bindings are scoped to the `"TextInput"` context in `text_input::init`.
 
 ## Persistence rules

@@ -5,7 +5,7 @@ use gpui::{
 };
 
 use crate::{
-    components::{Button, TextInput, TextInputEvent, chip, icon_button},
+    components::{Button, IconName, TextInput, TextInputEvent, chip, icon, icon_button},
     tasks::{Category, Id, Priority, Task, TaskStore, parse_quick_add},
     theme::{ActiveTheme, Theme},
 };
@@ -230,27 +230,28 @@ impl TasksPage {
             .flex()
             .flex_col()
             .gap_3()
-            .p_3()
-            .rounded_xl()
+            .p_4()
+            .rounded_2xl()
             .bg(theme.surface)
             .border_1()
-            .border_color(if editing { theme.accent } else { theme.border })
-            .shadow_sm()
+            .border_color(if editing {
+                theme.accent
+            } else {
+                gpui::transparent_black()
+            })
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap_3()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_none()
-                            .items_center()
-                            .justify_center()
-                            .size(px(18.))
-                            .text_color(theme.text_muted)
-                            .child(if editing { "✎" } else { "+" }),
-                    )
+                    .child(icon(
+                        if editing {
+                            IconName::Pencil
+                        } else {
+                            IconName::Plus
+                        },
+                        theme.text_muted,
+                    ))
                     .child(
                         div()
                             .flex_1()
@@ -306,14 +307,14 @@ impl TasksPage {
                 .flex()
                 .items_center()
                 .gap_2()
-                .px_3()
+                .px_3p5()
                 .py_1()
-                .rounded_md()
+                .rounded_full()
                 .text_sm()
                 .cursor_pointer()
                 .map(|this| {
                     if selected {
-                        this.bg(theme.background).text_color(theme.text).shadow_sm()
+                        this.bg(theme.selected).text_color(theme.text)
                     } else {
                         let text = theme.text;
                         this.text_color(muted).hover(move |s| s.text_color(text))
@@ -361,11 +362,9 @@ impl TasksPage {
                 div()
                     .flex()
                     .flex_none()
-                    .p_0p5()
-                    .rounded_lg()
+                    .p_1()
+                    .rounded_full()
                     .bg(theme.surface)
-                    .border_1()
-                    .border_color(theme.border)
                     .child(segment("view-todo", "To do", open, View::Todo, cx))
                     .child(segment("view-done", "Done", done, View::Done, cx)),
             )
@@ -437,19 +436,31 @@ impl TasksPage {
         let theme = cx.theme().clone();
         if tasks.is_empty() {
             let (glyph, message) = match (self.view, self.filter.is_some()) {
-                (View::Todo, false) => ("☀", "All clear. Add something above when it comes up."),
-                (View::Todo, true) => ("☀", "Nothing open in this category."),
-                (View::Done, _) => ("✓", "Completed tasks will show up here."),
+                (View::Todo, false) => (
+                    IconName::Sun,
+                    "All clear. Add something above when it comes up.",
+                ),
+                (View::Todo, true) => (IconName::Sun, "Nothing open in this category."),
+                (View::Done, _) => (IconName::Tasks, "Completed tasks will show up here."),
             };
             return div()
                 .flex()
                 .flex_col()
                 .items_center()
                 .justify_center()
-                .gap_2()
+                .gap_3()
                 .py_16()
                 .text_color(theme.text_muted)
-                .child(div().text_3xl().child(glyph))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .size(px(56.))
+                        .rounded_full()
+                        .bg(theme.surface)
+                        .child(icon(glyph, theme.text_muted).size_6()),
+                )
                 .child(div().text_sm().child(message))
                 .into_any_element();
         }
@@ -521,9 +532,7 @@ impl TasksPage {
                 if done {
                     this.border_color(theme.success)
                         .bg(theme.success)
-                        .text_color(gpui::white())
-                        .text_xs()
-                        .child("✓")
+                        .child(icon(IconName::Check, gpui::white()).size_2p5())
                 } else {
                     this.border_color(priority_color)
                         .hover(move |s| s.bg(priority_color.opacity(0.25)))
@@ -541,22 +550,25 @@ impl TasksPage {
             .group_hover(group.clone(), |s| s.opacity(1.))
             .when(!done, |this| {
                 this.child(
-                    icon_button(("priority", id), "●", hex(priority.cycle().color()), cx).on_click(
-                        cx.listener(move |this, _, _, cx| {
-                            this.store.update(cx, |store, cx| {
-                                store.set_priority(id, priority.cycle(), cx)
-                            });
-                        }),
-                    ),
+                    icon_button(
+                        ("priority", id),
+                        IconName::Flag,
+                        hex(priority.cycle().color()),
+                        cx,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.store
+                            .update(cx, |store, cx| store.set_priority(id, priority.cycle(), cx));
+                    })),
                 )
                 .child(
-                    icon_button(("edit", id), "✎", theme.text_muted, cx).on_click(
+                    icon_button(("edit", id), IconName::Pencil, theme.text_muted, cx).on_click(
                         cx.listener(move |this, _, window, cx| this.start_edit(id, window, cx)),
                     ),
                 )
             })
             .child(
-                icon_button(("delete", id), "✕", theme.danger, cx)
+                icon_button(("delete", id), IconName::X, theme.danger, cx)
                     .on_click(cx.listener(move |this, _, _, cx| this.delete(id, cx))),
             );
 
@@ -568,7 +580,7 @@ impl TasksPage {
             .gap_3()
             .px_3()
             .py_2()
-            .rounded_lg()
+            .rounded_xl()
             .when(self.editing == Some(id), |this| this.bg(theme.selected))
             .hover(move |s| s.bg(hover))
             .child(checkbox)
@@ -658,9 +670,9 @@ impl Render for TasksPage {
             .when_some(save_error, |this, error| {
                 this.child(
                     div()
-                        .px_3()
+                        .px_4()
                         .py_2()
-                        .rounded_lg()
+                        .rounded_xl()
                         .bg(theme.danger.opacity(0.15))
                         .text_sm()
                         .text_color(theme.danger)
@@ -675,12 +687,10 @@ impl Render for TasksPage {
                         .flex()
                         .items_center()
                         .justify_between()
-                        .px_3()
+                        .px_4()
                         .py_2()
-                        .rounded_lg()
+                        .rounded_xl()
                         .bg(theme.surface)
-                        .border_1()
-                        .border_color(theme.border)
                         .text_sm()
                         .text_color(theme.text_muted)
                         .child(format!("Deleted “{}”", task.title))
