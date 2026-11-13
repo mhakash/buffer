@@ -28,33 +28,20 @@ NSGradient(colors: [
 ])!.draw(in: squircle, angle: -60)
 NSShadow().set()
 
-// Three list lines; the first is "checked".
-let lineColor = NSColor.white.withAlphaComponent(0.9)
-for (ix, y) in [640.0, 500.0, 360.0].enumerated() {
-    let circle = NSBezierPath(ovalIn: NSRect(x: 250, y: y - 40, width: 80, height: 80))
-    circle.lineWidth = 22
-    lineColor.setStroke()
-    if ix == 0 {
-        NSColor.white.setFill()
-        // Match the outer edge of the stroked circles (stroke adds lineWidth/2 outside).
-        NSBezierPath(ovalIn: NSRect(x: 239, y: y - 51, width: 102, height: 102)).fill()
-        let check = NSBezierPath()
-        check.move(to: NSPoint(x: 268, y: y))
-        check.line(to: NSPoint(x: 284, y: y - 18))
-        check.line(to: NSPoint(x: 314, y: y + 20))
-        check.lineWidth = 16
-        check.lineCapStyle = .round
-        check.lineJoinStyle = .round
-        NSColor(srgbRed: 0.38, green: 0.42, blue: 0.98, alpha: 1).setStroke()
-        check.stroke()
-    } else {
-        circle.stroke()
+// 2x2 tile grid ("workspace of tools"); top-left tile is solid, the rest translucent.
+let tile: CGFloat = 220
+let gap: CGFloat = 64
+let origin = (size - (tile * 2 + gap)) / 2
+for row in 0..<2 {
+    for col in 0..<2 {
+        let rect = NSRect(
+            x: origin + CGFloat(col) * (tile + gap),
+            y: origin + CGFloat(1 - row) * (tile + gap),
+            width: tile, height: tile)
+        let solid = row == 0 && col == 0
+        NSColor.white.withAlphaComponent(solid ? 1.0 : 0.55).setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 56, yRadius: 56).fill()
     }
-    let bar = NSBezierPath(
-        roundedRect: NSRect(x: 380, y: y - 22, width: ix == 0 ? 300 : 390, height: 44),
-        xRadius: 22, yRadius: 22)
-    (ix == 0 ? NSColor.white.withAlphaComponent(0.55) : lineColor).setFill()
-    bar.fill()
 }
 
 NSGraphicsContext.restoreGraphicsState()
