@@ -1,61 +1,33 @@
-//! Two-step delete: the first click arms the button (it turns into a red "Delete?" pill), a second
-//! click within `ARM_SECS` confirms. Views hold one `armed` slot and implement `Confirmable`.
+//! Modal "are you sure?" before destructive actions (kit `AlertDialog`).
 
-use std::time::Duration;
+use std::rc::Rc;
 
-use gpui_kit::component::{
-    ActiveTheme, Sizable,
-    button::{Button, ButtonVariants},
-};
-use gpui_kit::{App, Context, ElementId, SharedString};
+use gpui_kit::component::{WindowExt, button::ButtonVariant};
+use gpui_kit::{App, SharedString, Window};
 
-use super::{chip::PILL, icon_button};
-use gpui_kit::assets::IconName;
-
-const ARM_SECS: u64 = 3;
-
-pub trait Confirmable: Sized + 'static {
-    fn armed(&mut self) -> &mut Option<SharedString>;
-}
-
-/// Returns true when `key` was already armed (go ahead and delete); otherwise arms it.
-pub fn confirm<V: Confirmable>(view: &mut V, key: SharedString, cx: &mut Context<V>) -> bool {
-    if view.armed().as_ref() == Some(&key) {
-        *view.armed() = None;
-        cx.notify();
-        return true;
-    }
-    *view.armed() = Some(key.clone());
-    cx.notify();
-    cx.spawn(async move |this, cx| {
-        cx.background_executor()
-            .timer(Duration::from_secs(ARM_SECS))
-            .await;
-        let _ = this.update(cx, |view, cx| {
-            if view.armed().as_ref() == Some(&key) {
-                *view.armed() = None;
-                cx.notify();
-            }
-        });
-    })
-    .detach();
-    false
-}
-
-/// X icon, or a red "Delete?" pill while armed.
-pub fn delete_button(
-    id: impl Into<ElementId>,
-    armed: bool,
-    tooltip: impl Into<SharedString>,
-    cx: &App,
-) -> Button {
-    if armed {
-        Button::new(id)
-            .danger()
-            .xsmall()
-            .rounded(PILL)
-            .label("Delete?")
-    } else {
-        icon_button(id, IconName::X, cx.theme().danger, tooltip)
-    }
+/// Opens a centered confirm dialog; `on_confirm` runs only if the user clicks Delete.
+pub fn confirm_delete(
+    window: &mut Window,
+    cx: &mut App,
+    title: impl Into<SharedString>,
+    description: impl Into<SharedString>,
+    on_confirm: impl Fn(&mut Window, &mut App) + 'static,
+) {
+    let title = title.into();
+    let description = description.into();
+    let on_confirm = Rc::new(on_confirm);
+    window.open_alert_dialog(cx, move |dialog, _, _| {
+        let on_confirm = on_confirm.clone();
+        dialog
+            .title(title.clone())
+            .description(description.clone())
+            .show_cancel(true)
+            .cancel_text("Cancel")
+            .ok_text("Delete")
+            .ok_variant(ButtonVariant::Danger)
+            .on_ok(move |_, window, cx| {
+                on_confirm(window, cx);
+                true
+            })
+    });
 }

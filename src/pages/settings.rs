@@ -1,3 +1,4 @@
+use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     ActiveTheme, Sizable,
     button::{Button, ButtonVariants},
@@ -7,16 +8,10 @@ use gpui_kit::component::{
     tab::{Tab, TabBar},
     v_flex,
 };
-use gpui_kit::{
-    Context, Entity, FontWeight, SharedString, Subscription, Window, div, prelude::*, px, rgb,
-};
+use gpui_kit::{Context, Entity, FontWeight, Subscription, Window, div, prelude::*, px, rgb};
 
 use crate::{
-    components::{
-        card,
-        confirm::{Confirmable, confirm, delete_button},
-        fx,
-    },
+    components::{card, confirm::confirm_delete, fx, icon_button},
     prefs, storage,
     tasks::TaskStore,
     theme::{self, Appearance},
@@ -28,7 +23,6 @@ pub struct SettingsPage {
     store: Entity<TaskStore>,
     category_input: Entity<InputState>,
     name_input: Entity<InputState>,
-    armed: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -73,7 +67,6 @@ impl SettingsPage {
             store,
             category_input,
             name_input,
-            armed: None,
             _subscriptions: subscriptions,
         }
     }
@@ -124,24 +117,36 @@ impl SettingsPage {
                                     .update(cx, |store, cx| store.cycle_category_color(id, cx));
                             })),
                     )
-                    .child(div().flex_1().text_sm().child(category.name))
+                    .child(div().flex_1().text_sm().child(category.name.clone()))
                     .child(
                         div()
                             .text_xs()
                             .text_color(theme.muted_foreground)
                             .child(format!("{open} open · {done} done")),
                     )
-                    .child({
-                        let key = SharedString::from(format!("category-{id}"));
-                        let armed = self.armed.as_ref() == Some(&key);
-                        delete_button(("category-delete", id), armed, "Delete category", cx)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if confirm(this, key.clone(), cx) {
-                                    this.store
-                                        .update(cx, |store, cx| store.delete_category(id, cx));
-                                }
-                            }))
-                    })
+                    .child(
+                        icon_button(
+                            ("category-delete", id),
+                            IconName::X,
+                            theme.danger,
+                            "Delete category",
+                        )
+                        .on_click({
+                            let name = category.name.clone();
+                            cx.listener(move |this, _, window, cx| {
+                                let store = this.store.clone();
+                                confirm_delete(
+                                    window,
+                                    cx,
+                                    "Delete category?",
+                                    format!("“{name}” will be removed. Its tasks are kept, uncategorised."),
+                                    move |_, cx| {
+                                        store.update(cx, |s, cx| s.delete_category(id, cx));
+                                    },
+                                );
+                            })
+                        }),
+                    )
             }))
             .child(
                 div()
@@ -152,12 +157,6 @@ impl SettingsPage {
                     .text_sm()
                     .child(Input::new(&self.category_input).appearance(false)),
             )
-    }
-}
-
-impl Confirmable for SettingsPage {
-    fn armed(&mut self) -> &mut Option<SharedString> {
-        &mut self.armed
     }
 }
 

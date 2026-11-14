@@ -18,11 +18,7 @@ use gpui_kit::{
 
 use super::OpenTask;
 use crate::{
-    components::{
-        category_tag, chip,
-        confirm::{Confirmable, confirm, delete_button},
-        fx, icon_button,
-    },
+    components::{category_tag, chip, confirm::confirm_delete, fx, icon_button},
     prefs, quotes,
     tasks::{
         Category, Id, Priority, Task, TaskStore, classify, completions_by_day, last_days,
@@ -65,7 +61,6 @@ pub struct TasksPage {
     drag_session: Option<DragSession>,
     /// Task open in the detail panel (highlighted in the list).
     selected: Option<Id>,
-    armed: Option<SharedString>,
     /// Ticked tasks playing their exit animation before they move to Done.
     completing: Vec<Id>,
     toast: Option<(u64, SharedString)>,
@@ -163,7 +158,6 @@ impl TasksPage {
             last_deleted: None,
             drag_session: None,
             selected: None,
-            armed: None,
             completing: Vec::new(),
             toast: None,
             _toast_timer: None,
@@ -1108,15 +1102,11 @@ impl TasksPage {
             0.35,
         );
 
-        let delete_key = SharedString::from(format!("task-{id}"));
-        let delete_armed = self.armed.as_ref() == Some(&delete_key);
         let actions = h_flex()
             .flex_none()
             .gap_0p5()
-            .when(!delete_armed, |this| {
-                this.opacity(0.)
-                    .group_hover(group.clone(), |s| s.opacity(1.))
-            })
+            .opacity(0.)
+            .group_hover(group.clone(), |s| s.opacity(1.))
             .when(!done, |this| {
                 let next = priority.cycle();
                 this.child(
@@ -1144,13 +1134,23 @@ impl TasksPage {
                 )
             })
             .child(
-                delete_button(("delete", id), delete_armed, "Delete", cx).on_click(cx.listener(
-                    move |this, _, window, cx| {
-                        if confirm(this, delete_key.clone(), cx) {
-                            this.delete(id, window, cx);
-                        }
-                    },
-                )),
+                icon_button(("delete", id), IconName::X, theme.danger, "Delete").on_click({
+                    let title = task.title.clone();
+                    cx.listener(move |_, _, window, cx| {
+                        let view = cx.entity().downgrade();
+                        confirm_delete(
+                            window,
+                            cx,
+                            "Delete task?",
+                            format!(
+                                "“{title}” and its notes, subtasks, links and log will be removed."
+                            ),
+                            move |window, cx| {
+                                let _ = view.update(cx, |this, cx| this.delete(id, window, cx));
+                            },
+                        );
+                    })
+                }),
             );
 
         let category_drag = category.map(|c| (c.name.clone().into(), c.color));
@@ -1305,12 +1305,6 @@ impl TasksPage {
 }
 
 impl EventEmitter<OpenTask> for TasksPage {}
-
-impl Confirmable for TasksPage {
-    fn armed(&mut self) -> &mut Option<SharedString> {
-        &mut self.armed
-    }
-}
 
 impl Render for TasksPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
