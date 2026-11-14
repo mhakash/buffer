@@ -9,6 +9,7 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
+use gpui_kit::component::Theme;
 use gpui_kit::component::{
     ActiveTheme, h_flex,
     text::{
@@ -18,9 +19,12 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    App, ElementId, Image, ImageFormat, ImageSource, IntoElement, ParentElement, SharedString,
-    SharedUri, Styled, Window, div, img, px, rems, rgb,
+    App, CursorStyle, ElementId, Hsla, Image, ImageFormat, ImageSource, InteractiveElement,
+    IntoElement, ObjectFit, ParentElement, Rgba, SharedString, SharedUri,
+    StatefulInteractiveElement, Styled, StyledImage, Window, div, img, px, rems,
 };
+
+use super::lightbox;
 
 /// Markdown notes sit under small section labels: headings stay close to the body size
 /// (hierarchy from weight) and paragraphs tight.
@@ -53,14 +57,16 @@ pub fn markdown_view(
     style: TextViewStyle,
     dir: PathBuf,
 ) -> TextView {
+    let images = dir.clone();
     TextView::markdown(id, text)
         .style(style)
         .selectable(true)
-        .image_source(move |uri| resolve_image(uri, &dir))
+        .image_source(move |uri| resolve_image(uri, &images))
         // Replaces the extension set, so it goes before the plugins.
         .markdown_extensions(MarkdownExtensions::default().frontmatter())
         .plugin(FrontmatterPlugin)
         .plugin(MermaidPlugin)
+        .plugin(ImagePlugin { dir })
 }
 
 /// Remote URLs load through the app's HTTP client (`net.rs`); `data:` URLs decode inline;
@@ -98,37 +104,219 @@ struct Diagram {
     source: String,
 }
 
-/// Rendered SVG (or the parse error) per (source, dark), so each diagram renders once.
-type Rendered = Result<(Arc<Image>, f32, f32), String>;
-static CACHE: LazyLock<Mutex<HashMap<(u64, bool), Rendered>>> = LazyLock::new(Default::default);
+/// A rendered diagram: SVG text (re-scaled for the full view), shown image, natural size.
+#[derive(Clone)]
+struct Rendered {
+    svg: Arc<str>,
+    image: Arc<Image>,
+    size: (f32, f32),
+}
 
-fn render_diagram(source: &str, dark: bool) -> Rendered {
+/// Rendered diagram (or the parse error) per (source, palette), so each renders once.
+static CACHE: LazyLock<Mutex<HashMap<u64, Result<Rendered, String>>>> =
+    LazyLock::new(Default::default);
+
+/// Colors as `#rrggbb` for the SVG.
+fn hex(color: Hsla) -> String {
+    let c = Rgba::from(color);
+    let byte = |v: f32| (v.clamp(0., 1.) * 255.).round() as u8;
+    format!("#{:02x}{:02x}{:02x}", byte(c.r), byte(c.g), byte(c.b))
+}
+
+/// `base` tinted `amount` (0–1) toward `tint`, opaque.
+fn mix(base: Hsla, tint: Hsla, amount: f32) -> Hsla {
+    let (a, b) = (Rgba::from(base.opacity(1.)), Rgba::from(tint.opacity(1.)));
+    let lerp = |x: f32, y: f32| x + (y - x) * amount;
+    Rgba {
+        r: lerp(a.r, b.r),
+        g: lerp(a.g, b.g),
+        b: lerp(a.b, b.b),
+        a: 1.,
+    }
+    .into()
+}
+
+/// The diagram card's surface: opaque so node and label fills can match it exactly.
+fn diagram_surface(theme: &Theme) -> Hsla {
+    theme.popover.opacity(1.)
+}
+
+/// Mermaid colors from the app palette: accent-tinted nodes on the card's surface, muted
+/// lines, pill labels. Transparent canvas so the card shows through.
+fn diagram_theme(theme: &Theme) -> mermaid_rs_renderer::Theme {
+    let dark = theme.is_dark();
+    let surface = diagram_surface(theme);
+    let accent = theme.primary;
+    let node = hex(mix(surface, accent, if dark { 0.16 } else { 0.07 }));
+    let border = hex(mix(surface, accent, if dark { 0.5 } else { 0.32 }));
+    let line = hex(mix(surface, theme.muted_foreground, 0.8));
+    let text = hex(theme.foreground);
+    let note = hex(mix(surface, theme.chart_4, if dark { 0.18 } else { 0.12 }));
+    let note_border = hex(mix(surface, theme.chart_4, 0.45));
+    let charts = [
+        theme.chart_1,
+        theme.chart_2,
+        theme.chart_3,
+        theme.chart_4,
+        theme.chart_5,
+    ];
+    let mut t = mermaid_rs_renderer::Theme::modern();
+    t.font_family = "\"SF Pro Text\", \"Helvetica Neue\", Helvetica, Arial, sans-serif".into();
+    t.font_size = 14.;
+    t.background = "none".into();
+    t.primary_color = node.clone();
+    t.secondary_color = node.clone();
+    t.tertiary_color = node.clone();
+    t.primary_border_color = border.clone();
+    t.primary_text_color = text.clone();
+    t.text_color = text.clone();
+    t.line_color = line.clone();
+    t.edge_label_background = hex(surface);
+    t.cluster_background = hex(mix(surface, accent, if dark { 0.06 } else { 0.03 }));
+    t.cluster_border = border.clone();
+    t.sequence_actor_fill = node.clone();
+    t.sequence_actor_border = border.clone();
+    t.sequence_actor_line = line;
+    t.sequence_note_fill = note;
+    t.sequence_note_border = note_border;
+    t.sequence_activation_fill = node;
+    t.sequence_activation_border = border.clone();
+    t.pie_colors = std::array::from_fn(|i| {
+        let amount = if i < 5 { 0.85 } else { 0.5 };
+        hex(mix(surface, charts[i % 5], amount))
+    });
+    t.pie_title_text_color = text.clone();
+    t.pie_section_text_color = text.clone();
+    t.pie_legend_text_color = text;
+    t.pie_stroke_color = hex(surface);
+    t.pie_outer_stroke_color = border;
+    t.pie_opacity = 1.;
+    t
+}
+
+/// Mermaid.js strips quotes from `|"label"|` edge labels; the renderer shows them literally.
+fn unquote_edge_labels(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut rest = source;
+    while let Some(start) = rest.find("|\"") {
+        let after = &rest[start + 2..];
+        // Only within one line, so a stray `|"` can't swallow the rest of the diagram.
+        let line_end = after.find('\n').unwrap_or(after.len());
+        match after[..line_end].find("\"|") {
+            Some(end) => {
+                out.push_str(&rest[..start + 1]);
+                out.push_str(&after[..end]);
+                out.push('|');
+                rest = &after[end + 2..];
+            }
+            None => {
+                out.push_str(&rest[..start + 2]);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Softer shapes than the renderer draws: rounder boxes, pill edge labels, thinner edges.
+fn polish_svg(svg: &str) -> String {
+    let svg = svg
+        .replace("rx=\"3\" ry=\"3\"", "rx=\"10\" ry=\"10\"")
+        // SVG clamps the radius to half the box: pills.
+        .replace("rx=\"2\" ry=\"2\"", "rx=\"99\" ry=\"99\"");
+    let mut out = String::with_capacity(svg.len());
+    let mut rest = svg.as_str();
+    while let Some(ix) = rest.find("class=\"edgePath\"") {
+        let (head, tail) = rest.split_at(ix);
+        out.push_str(head);
+        let tag_end = tail.find("/>").unwrap_or(tail.len());
+        out.push_str(&tail[..tag_end].replacen("stroke-width=\"2\"", "stroke-width=\"1.5\"", 1));
+        rest = &tail[tag_end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The same SVG drawn `scale`× larger, so the full view rasterizes sharp.
+fn scale_svg(svg: &str, (w, h): (f32, f32), scale: f32) -> String {
+    let Some(tag_end) = svg.find('>') else {
+        return svg.to_string();
+    };
+    let (root, body) = svg.split_at(tag_end);
+    let mut root = root.to_string();
+    for (attr, value) in [("width", w), ("height", h)] {
+        let key = format!(" {attr}=\"");
+        if let Some(start) = root.find(&key) {
+            let value_start = start + key.len();
+            if let Some(len) = root[value_start..].find('"') {
+                root.replace_range(
+                    value_start..value_start + len,
+                    &format!("{}", value * scale),
+                );
+            }
+        }
+    }
+    root + body
+}
+
+fn render_diagram(source: &str, theme: &Theme) -> Result<Rendered, String> {
+    let palette = diagram_theme(theme);
     let mut hasher = DefaultHasher::new();
     source.hash(&mut hasher);
-    let key = (hasher.finish(), dark);
+    serde_json::to_string(&palette)
+        .unwrap_or_default()
+        .hash(&mut hasher);
+    let key = hasher.finish();
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     cache
         .entry(key)
         .or_insert_with(|| {
-            let options = mermaid_rs_renderer::RenderOptions {
-                theme: if dark {
-                    mermaid_rs_renderer::Theme::dark()
-                } else {
-                    mermaid_rs_renderer::Theme::modern()
-                },
+            let mut options = mermaid_rs_renderer::RenderOptions {
+                theme: palette,
                 ..Default::default()
             };
-            let size = mermaid_rs_renderer::measure(source, options.clone())
+            // Airier than the defaults: fewer crossings and labels that clear the lines.
+            options.layout.node_spacing = 60.;
+            options.layout.rank_spacing = 64.;
+            options.layout.node_padding_x = 22.;
+            options.layout.node_padding_y = 14.;
+            let source = unquote_edge_labels(source);
+            let size = mermaid_rs_renderer::measure(&source, options.clone())
                 .map_err(|e| format!("{e:#}"))?;
-            let svg = mermaid_rs_renderer::render_with_options(source, options)
+            let svg = mermaid_rs_renderer::render_with_options(&source, options)
                 .map_err(|e| format!("{e:#}"))?;
-            Ok((
-                Arc::new(Image::from_bytes(ImageFormat::Svg, svg.into_bytes())),
-                size.width,
-                size.height,
-            ))
+            let svg = polish_svg(&svg);
+            Ok(Rendered {
+                image: Arc::new(Image::from_bytes(
+                    ImageFormat::Svg,
+                    svg.clone().into_bytes(),
+                )),
+                svg: svg.into(),
+                size: (size.width, size.height),
+            })
         })
         .clone()
+}
+
+/// Opens a diagram in the full view, re-rendered large enough to stay sharp.
+fn open_diagram(diagram: &Rendered, window: &mut Window, cx: &mut App) {
+    let view = window.viewport_size();
+    let (w, h) = diagram.size;
+    let fit = (f32::from(view.width) / w)
+        .min(f32::from(view.height) / h)
+        .clamp(1., 2.);
+    let image = if fit > 1.05 {
+        let svg = scale_svg(&diagram.svg, diagram.size, fit);
+        Arc::new(Image::from_bytes(ImageFormat::Svg, svg.into_bytes()))
+    } else {
+        diagram.image.clone()
+    };
+    let canvas = lightbox::Canvas {
+        size: diagram.size,
+        surface: diagram_surface(cx.theme()),
+    };
+    lightbox::open(ImageSource::Image(image), Some(canvas), window, cx);
 }
 
 impl MarkdownPlugin for MermaidPlugin {
@@ -173,28 +361,36 @@ impl MarkdownPlugin for MermaidPlugin {
             .data::<Diagram>()
             .map(|d| d.source.as_str())
             .unwrap_or_default();
-        let dark = theme.is_dark();
-        // The renderer paints its own canvas (white / #333); match it so the diagram doesn't
-        // sit as a card inside a card.
         let frame = v_flex()
             .w_full()
             .my_2()
-            .p_4()
+            .p_5()
             .gap_2()
-            .rounded_xl()
+            .rounded_2xl()
             .border_1()
             .border_color(theme.border)
-            .bg(rgb(if dark { 0x333333 } else { 0xffffff }));
-        match render_diagram(source, dark) {
+            .bg(diagram_surface(theme));
+        match render_diagram(source, theme) {
             // Natural size, shrunk to the column. `img` alone keeps its intrinsic height when
             // shrunk, so a box sized by aspect ratio carries the layout and the image fills it.
-            Ok((image, w, h)) => frame.items_center().child(
-                div()
-                    .w_full()
-                    .max_w(px(w))
-                    .aspect_ratio(w / h.max(1.))
-                    .child(img(image).size_full()),
-            ),
+            Ok(diagram) => {
+                let (w, h) = diagram.size;
+                let mut hasher = DefaultHasher::new();
+                source.hash(&mut hasher);
+                frame.items_center().child(
+                    div()
+                        .id(("mermaid", hasher.finish()))
+                        .w_full()
+                        .max_w(px(w))
+                        .aspect_ratio(w / h.max(1.))
+                        .cursor(CursorStyle::PointingHand)
+                        .child(img(diagram.image.clone()).size_full())
+                        .on_click(move |_, window, cx| {
+                            cx.stop_propagation();
+                            open_diagram(&diagram, window, cx);
+                        }),
+                )
+            }
             Err(err) => frame
                 .child(
                     div()
@@ -211,6 +407,87 @@ impl MarkdownPlugin for MermaidPlugin {
                         .child(source.to_string()),
                 ),
         }
+    }
+}
+
+const IMAGE: &str = "image";
+
+/// Paragraphs holding only images render them as blocks that open the full view on click.
+/// Images inside running text stay with the kit's inline renderer.
+struct ImagePlugin {
+    dir: PathBuf,
+}
+
+struct Images(Vec<(SharedUri, SharedString)>);
+
+impl MarkdownPlugin for ImagePlugin {
+    fn is_block(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &str {
+        IMAGE
+    }
+
+    fn parse(
+        &self,
+        node: &markdown_ast::Node,
+        cx: &MarkdownParseContext<'_>,
+    ) -> Option<MarkdownNode> {
+        let markdown_ast::Node::Paragraph(paragraph) = node else {
+            return None;
+        };
+        let mut images = Vec::new();
+        for child in &paragraph.children {
+            match child {
+                markdown_ast::Node::Image(image) => images.push((
+                    SharedUri::from(image.url.clone()),
+                    SharedString::from(image.alt.clone()),
+                )),
+                markdown_ast::Node::Text(text) if text.value.trim().is_empty() => {}
+                markdown_ast::Node::Break(_) => {}
+                _ => return None,
+            }
+        }
+        if images.is_empty() {
+            return None;
+        }
+        let alt = images
+            .iter()
+            .map(|(_, alt)| alt.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let source = cx.node_source(node).unwrap_or_default().to_string();
+        Some(
+            MarkdownNode::new(IMAGE, Images(images))
+                .text(alt)
+                .markdown(source),
+        )
+    }
+
+    fn render(&self, node: &MarkdownNode, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let images = node
+            .data::<Images>()
+            .map(|i| i.0.as_slice())
+            .unwrap_or_default();
+        v_flex()
+            .w_full()
+            .gap_2()
+            .children(images.iter().map(|(uri, _)| {
+                let source = resolve_image(uri, &self.dir);
+                let mut hasher = DefaultHasher::new();
+                uri.hash(&mut hasher);
+                img(source.clone())
+                    .id(("md-image", hasher.finish()))
+                    .object_fit(ObjectFit::Contain)
+                    .max_w_full()
+                    .rounded_lg()
+                    .cursor(CursorStyle::PointingHand)
+                    .on_click(move |_, window, cx| {
+                        cx.stop_propagation();
+                        lightbox::open(source.clone(), None, window, cx);
+                    })
+            }))
     }
 }
 
@@ -317,6 +594,26 @@ impl MarkdownPlugin for FrontmatterPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unquotes_edge_labels() {
+        assert_eq!(
+            unquote_edge_labels("A -->|\"read\"| B\nC -->|plain| D\nE --> F[\"|\"]"),
+            "A -->|read| B\nC -->|plain| D\nE --> F[\"|\"]"
+        );
+    }
+
+    #[test]
+    fn scales_svg_root_size() {
+        assert_eq!(
+            scale_svg(
+                "<svg width=\"10\" height=\"20\" viewBox=\"0 0 10 20\"><rect width=\"10\"/>",
+                (10., 20.),
+                2.
+            ),
+            "<svg width=\"20\" height=\"40\" viewBox=\"0 0 10 20\"><rect width=\"10\"/>"
+        );
+    }
 
     #[test]
     fn parses_frontmatter_scalars_and_lists() {

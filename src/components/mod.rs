@@ -5,6 +5,7 @@ mod card;
 mod chip;
 pub mod confirm;
 pub mod fx;
+pub mod lightbox;
 mod markdown;
 mod property;
 

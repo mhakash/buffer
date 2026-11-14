@@ -125,10 +125,12 @@ Task notes and notes render the same Markdown, plus:
 
 | Syntax | Renders as |
 |---|---|
-| ```` ```mermaid ```` fence | Diagram (flowchart, sequence, class, state, ER, gantt, pie, …), rendered natively; invalid syntax shows the error and source |
+| ```` ```mermaid ```` fence | Diagram (flowchart, sequence, class, state, ER, gantt, pie, …), rendered natively in the app's palette; invalid syntax shows the error and source |
 | Leading `---` YAML block | Property rows (lists as pills) |
 | `![](https://…)` | Remote image (fetched by the app) |
 | `![](file.png)`, `~/…`, `/abs/…`, `file://…` | Local image; relative paths resolve against the note's folder (`notes/` or `tasks/<id>/`) |
+
+Click a diagram, or an image on its own line, to open it full-window; click or Esc closes.
 
 ## Look
 
@@ -164,7 +166,7 @@ pulsing indicators (saves battery). macOS "Reduce motion" is honoured by every a
 | `src/workspace.rs` | Root view: aurora backdrop, title bar clock, sidebar, page transitions |
 | `src/tasks/` | Task model, quick-add parser, link classifier (`links.rs`), `TaskStore` entity (index + per-task folders, v1 migration) |
 | `src/pages/` | One file per page; `Page` enum drives the sidebar |
-| `src/components/` | Thin wrappers over gpui-kit (`chip`, `icon_button`, `category_tag`, `card`), icon `Assets`, `markdown_view` (Mermaid, frontmatter, image paths), `property_row`, `fx` (glow, gradients, ring, enter/pulse animations) |
+| `src/components/` | Thin wrappers over gpui-kit (`chip`, `icon_button`, `category_tag`, `card`), icon `Assets`, `markdown_view` (Mermaid, frontmatter, image paths), `lightbox` (full-window image view), `property_row`, `fx` (glow, gradients, ring, enter/pulse animations) |
 | `bacon.toml` | `make dev` rebuild/relaunch job |
 | `scripts/` | Icon generation, `.app` bundling, install; `ui/` = window/mouse/recording helpers for checking the UI |
 

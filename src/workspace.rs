@@ -17,7 +17,7 @@ use crate::{
     },
     components::{
         fx::{self, SPRING},
-        icon_button,
+        icon_button, lightbox,
     },
     focus::FocusTimer,
     pages::{
@@ -463,6 +463,7 @@ impl Render for Workspace {
         div()
             .id("workspace")
             .track_focus(&self.focus_handle)
+            .capture_key_down(lightbox::capture_key)
             .on_action(
                 cx.listener(|this, _: &ShowTasks, window, cx| {
                     this.navigate(Page::Tasks, window, cx)
@@ -604,6 +605,7 @@ impl Render for Workspace {
                         |el, v| el.opacity(v.clamp(0., 1.)),
                     ),
             )
+            .children(lightbox::render(window, cx))
     }
 }
 
