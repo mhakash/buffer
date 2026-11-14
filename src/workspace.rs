@@ -120,18 +120,27 @@ impl Workspace {
     }
 
     fn render_brand(&self, theme: &Theme) -> impl IntoElement {
+        // Same 2x2 tile grid as the app icon (scripts/make_icon.swift), scaled from 824px.
+        let tile =
+            |solid: bool| {
+                div().size(px(9.6)).rounded(px(2.4)).bg(theme
+                    .primary_foreground
+                    .opacity(if solid { 1. } else { 0.55 }))
+            };
+        let gap = px(2.8);
         let mark = div()
             .flex()
             .items_center()
             .justify_center()
             .size(px(36.))
-            .rounded_xl()
-            .bg(fx::brand_gradient(theme, 135.))
+            .rounded(px(8.))
+            .bg(fx::brand_gradient(theme, 150.))
             .shadow(fx::glow(theme.chart_1.opacity(0.45), 18., 0.))
             .child(
-                Icon::new(IconName::Sparkles)
-                    .text_color(theme.primary_foreground)
-                    .size_5(),
+                v_flex()
+                    .gap(gap)
+                    .child(h_flex().gap(gap).child(tile(true)).child(tile(false)))
+                    .child(h_flex().gap(gap).child(tile(false)).child(tile(false))),
             );
         h_flex().gap_3().px_2().child(mark).child(
             v_flex()
