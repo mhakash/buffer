@@ -21,7 +21,7 @@ use crate::{
     tasks::{Id, LinkKind, Task, TaskStore, classify, is_url},
 };
 
-pub const PANEL_W: f32 = 460.;
+pub const PANEL_W: f32 = 420.;
 
 /// Emitted by any page that wants a task opened in the panel.
 pub struct OpenTask(pub Id);

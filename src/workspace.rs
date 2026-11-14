@@ -17,7 +17,7 @@ use crate::{
         icon_button,
     },
     focus::FocusTimer,
-    pages::{DetailEvent, FocusPage, OpenTask, Page, SettingsPage, TaskDetail, TasksPage},
+    pages::{DetailEvent, FocusPage, OpenTask, PANEL_W, Page, SettingsPage, TaskDetail, TasksPage},
     prefs, quotes,
     tasks::{TaskStore, completions_by_day, streak},
     theme::{self, Appearance},
@@ -405,7 +405,7 @@ impl Workspace {
 }
 
 impl Render for Workspace {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let ambient = prefs::get(cx).ambient;
         let page_id = self.active as u64;
@@ -415,12 +415,17 @@ impl Render for Workspace {
             self.detail.update(cx, |d, cx| d.close(cx));
         }
         let show_detail = self.active != Page::Settings && self.detail.read(cx).task_id().is_some();
+        // Dock the panel beside the page only if the page keeps room to breathe.
+        const SIDEBAR_W: f32 = 236. + 12.;
+        const MIN_CONTENT_W: f32 = 480.;
+        let docked = window.viewport_size().width >= px(SIDEBAR_W + MIN_CONTENT_W + PANEL_W + 12.);
 
         let page = div()
             .w_full()
             .max_w(px(920.))
             .mx_auto()
-            .px_10()
+            .when(show_detail && docked, |this| this.px_6())
+            .when(!(show_detail && docked), |this| this.px_10())
             .pt_4()
             .pb_12()
             .child(self.active_view());
@@ -463,6 +468,7 @@ impl Render for Workspace {
                     .child(self.render_title_bar(&theme))
                     .child(
                         h_flex()
+                            .relative()
                             .items_stretch()
                             .flex_1()
                             .min_h_0()
@@ -475,9 +481,29 @@ impl Render for Workspace {
                                     .overflow_y_scroll()
                                     .child(fx::enter(page, ("page", page_id), 0)),
                             )
-                            .when(show_detail, |this| {
+                            .when(show_detail && docked, |this| {
                                 this.child(
                                     div().flex_none().mr_3().mb_3().child(self.detail.clone()),
+                                )
+                            })
+                            // Too narrow to share: float the panel over the content instead.
+                            .when(show_detail && !docked, |this| {
+                                this.child(
+                                    div()
+                                        .absolute()
+                                        .top_0()
+                                        .bottom_3()
+                                        .right_3()
+                                        .rounded_2xl()
+                                        .bg(theme.background)
+                                        .shadow(vec![gpui_kit::BoxShadow {
+                                            color: gpui_kit::black().opacity(0.25),
+                                            offset: gpui_kit::point(px(0.), px(12.)),
+                                            blur_radius: px(48.),
+                                            spread_radius: px(0.),
+                                            inset: false,
+                                        }])
+                                        .child(self.detail.clone()),
                                 )
                             }),
                     ),

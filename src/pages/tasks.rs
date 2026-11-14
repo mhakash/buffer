@@ -490,7 +490,9 @@ impl TasksPage {
         };
 
         h_flex()
-            .gap_8()
+            .flex_wrap()
+            .gap_x_8()
+            .gap_y_5()
             .p_6()
             .rounded_2xl()
             .bg(fx::wash(theme, 0.20))
@@ -499,7 +501,8 @@ impl TasksPage {
             .child(
                 v_flex()
                     .flex_1()
-                    .min_w_0()
+                    // Wraps the chart + ring below instead of squeezing the greeting.
+                    .min_w(px(280.))
                     .gap_2()
                     .child(
                         div()
@@ -552,31 +555,38 @@ impl TasksPage {
                             }),
                     ),
             )
-            .child(self.render_week(&stats.week, theme))
             .child(
-                fx::ring_box(112.)
-                    .child(fx::ring(
-                        "hero-ring",
-                        fraction,
-                        112.,
-                        10.,
-                        fx::brand_pair(theme),
-                        theme,
-                    ))
+                h_flex()
+                    .flex_none()
+                    .gap_8()
+                    // The week chart is the first thing to go when the detail panel is open.
+                    .when(self.selected.is_none(), |this| {
+                        this.child(self.render_week(&stats.week, theme))
+                    })
                     .child(
-                        v_flex()
-                            .items_center()
+                        fx::ring_box(112.)
+                            .child(fx::ring(
+                                "hero-ring",
+                                fraction,
+                                112.,
+                                10.,
+                                fx::brand_pair(theme),
+                                theme,
+                            ))
                             .child(
-                                div()
-                                    .text_xl()
-                                    .font_weight(FontWeight::BOLD)
-                                    .child(format!("{}%", (fraction * 100.).round() as u32)),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child("of today"),
+                                v_flex()
+                                    .items_center()
+                                    .child(
+                                        div().text_xl().font_weight(FontWeight::BOLD).child(
+                                            format!("{}%", (fraction * 100.).round() as u32),
+                                        ),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .child("of today"),
+                                    ),
                             ),
                     ),
             )

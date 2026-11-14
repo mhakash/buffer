@@ -1,6 +1,6 @@
 [package]
 name = "workdesk"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2024"
 description = "Desktop app for work tooling, built on GPUI"
 publish = false

@@ -66,7 +66,8 @@ and the last 7 days.
 
 ## Task details
 
-Click a task's title to open its panel on the right (Esc or × closes):
+Click a task's title to open its panel on the right (Esc or × closes). Wide windows dock it beside
+the list; narrower ones float it over the page:
 
 | Section | What it holds |
 |---|---|
