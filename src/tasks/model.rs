@@ -1,4 +1,6 @@
-use chrono::{DateTime, Utc};
+use std::collections::BTreeMap;
+
+use chrono::{DateTime, Local, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
 pub type Id = u64;
@@ -93,6 +95,45 @@ impl Task {
     pub fn is_done(&self) -> bool {
         self.completed_at.is_some()
     }
+}
+
+/// Completed-task count per local calendar day.
+pub fn completions_by_day(tasks: &[Task]) -> BTreeMap<NaiveDate, usize> {
+    let mut days = BTreeMap::new();
+    for ts in tasks.iter().filter_map(|t| t.completed_at) {
+        *days
+            .entry(ts.with_timezone(&Local).date_naive())
+            .or_insert(0) += 1;
+    }
+    days
+}
+
+/// Counts for the `n` days ending `today`, oldest first.
+pub fn last_days(by_day: &BTreeMap<NaiveDate, usize>, today: NaiveDate, n: usize) -> Vec<usize> {
+    (0..n)
+        .rev()
+        .map(|back| {
+            let day = today - chrono::Days::new(back as u64);
+            by_day.get(&day).copied().unwrap_or(0)
+        })
+        .collect()
+}
+
+/// Consecutive days with at least one completion, ending today — or yesterday, so a streak
+/// isn't shown as broken before you've had a chance to finish something today.
+pub fn streak(by_day: &BTreeMap<NaiveDate, usize>, today: NaiveDate) -> usize {
+    let has = |d: NaiveDate| by_day.get(&d).is_some_and(|n| *n > 0);
+    let mut day = if has(today) {
+        today
+    } else {
+        today - chrono::Days::new(1)
+    };
+    let mut count = 0;
+    while has(day) {
+        count += 1;
+        day = day - chrono::Days::new(1);
+    }
+    count
 }
 
 /// On-disk shape of `tasks.json`. Add fields with `#[serde(default)]` to stay backward compatible.
@@ -216,6 +257,19 @@ mod tests {
     fn category_names_match_loosely() {
         assert_eq!(category_key("Follow-up"), category_key("follow_up"));
         assert_eq!(category_key("Follow up"), category_key("FOLLOWUP"));
+    }
+
+    #[test]
+    fn streak_counts_back_from_today_or_yesterday() {
+        let today = NaiveDate::from_ymd_opt(2026, 11, 14).unwrap();
+        let d = |n: u64| today - chrono::Days::new(n);
+        let by_day: BTreeMap<_, _> = [(d(1), 2), (d(2), 1), (d(4), 3)].into_iter().collect();
+        assert_eq!(streak(&by_day, today), 2);
+        let mut with_today = by_day.clone();
+        with_today.insert(today, 1);
+        assert_eq!(streak(&with_today, today), 3);
+        assert_eq!(streak(&BTreeMap::new(), today), 0);
+        assert_eq!(last_days(&by_day, today, 5), vec![3, 0, 1, 2, 0]);
     }
 
     #[test]

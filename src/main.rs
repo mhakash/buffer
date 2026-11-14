@@ -1,12 +1,16 @@
 mod actions;
 mod components;
+mod focus;
 mod pages;
+mod prefs;
+mod quotes;
 mod storage;
 mod tasks;
 mod theme;
 mod workspace;
 
-use gpui_kit::{App, AppContext, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size};
+use gpui_kit::component::TitleBar;
+use gpui_kit::{App, AppContext, Bounds, WindowBounds, WindowOptions, px, size};
 
 use crate::workspace::Workspace;
 
@@ -23,6 +27,7 @@ fn main() {
 
     app.run(|cx: &mut App| {
         gpui_kit::init(cx);
+        prefs::init(cx);
         theme::init(cx);
         actions::init(cx);
 
@@ -41,16 +46,16 @@ fn main() {
 }
 
 fn open_main_window(cx: &mut App) {
-    let bounds = Bounds::centered(None, size(px(1000.), px(760.)), cx);
+    let bounds = Bounds::centered(None, size(px(1180.), px(800.)), cx);
+    let mut titlebar = TitleBar::title_bar_options();
+    titlebar.title = Some(APP_NAME.into());
     let result = gpui_kit::open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
-            window_min_size: Some(size(px(720.), px(480.))),
-            titlebar: Some(TitlebarOptions {
-                title: Some(APP_NAME.into()),
-                ..Default::default()
-            }),
-            ..Default::default()
+            window_min_size: Some(size(px(860.), px(560.))),
+            // Transparent title bar: the workspace draws edge-to-edge and owns dragging.
+            titlebar: Some(titlebar),
+            ..TitleBar::window_options()
         },
         cx,
         |window, cx| cx.new(|cx| Workspace::new(window, cx)),

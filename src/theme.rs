@@ -9,9 +9,8 @@ use gpui_kit::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::storage;
+use crate::prefs;
 
-const SETTINGS_FILE: &str = "settings.json";
 const THEMES: &str = include_str!("../themes/workdesk.json");
 const LIGHT: &str = "Workdesk Light";
 const DARK: &str = "Workdesk Dark";
@@ -48,20 +47,13 @@ impl Appearance {
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
-struct Settings {
-    #[serde(default)]
-    appearance: Appearance,
-}
-
-/// Call after `gpui_kit::init`.
+/// Call after `gpui_kit::init` and `prefs::init`.
 pub fn init(cx: &mut App) {
     if let Err(err) = ThemeRegistry::global_mut(cx).load_themes_from_str(THEMES) {
         eprintln!("failed to parse embedded themes: {err:#}");
     }
     select_workdesk_themes(cx);
-    let settings: Settings = storage::load(SETTINGS_FILE);
-    Theme::change(settings.appearance.mode(), None, cx);
+    Theme::change(prefs::get(cx).appearance.mode(), None, cx);
 
     #[cfg(debug_assertions)]
     {
@@ -91,9 +83,7 @@ fn select_workdesk_themes(cx: &mut App) {
 
 pub fn set(appearance: Appearance, cx: &mut App) {
     Theme::change(appearance.mode(), None, cx);
-    if let Err(err) = storage::save(SETTINGS_FILE, &Settings { appearance }) {
-        eprintln!("failed to save settings: {err:#}");
-    }
+    prefs::update(cx, |p| p.appearance = appearance);
 }
 
 pub fn toggle(cx: &mut App) {

@@ -3,7 +3,31 @@ use std::borrow::Cow;
 use gpui_kit::{AssetSource, Result, SharedString, assets::icon_assets};
 
 // gpui-kit embeds only its component icons; list any other Lucide icon the app uses here.
-icon_assets!(ExtraIcons, [Flag, GripVertical, ListTodo, Pencil, X]);
+icon_assets!(
+    ExtraIcons,
+    [
+        Brain,
+        Coffee,
+        Flag,
+        Flame,
+        GripVertical,
+        ListTodo,
+        Moon,
+        Pause,
+        Pencil,
+        Play,
+        Quote,
+        RotateCcw,
+        SkipForward,
+        Sparkles,
+        Sun,
+        Target,
+        Timer,
+        Trophy,
+        X,
+        Zap,
+    ]
+);
 
 /// gpui-kit's component icons plus `ExtraIcons`; register with `Application::with_assets`.
 pub struct Assets;
@@ -34,15 +58,29 @@ mod tests {
     #[test]
     fn every_used_icon_has_an_asset() {
         for name in [
+            IconName::Brain,
             IconName::Check,
+            IconName::Coffee,
             IconName::Flag,
+            IconName::Flame,
             IconName::GripVertical,
             IconName::ListTodo,
+            IconName::Moon,
+            IconName::Pause,
             IconName::Pencil,
+            IconName::Play,
             IconName::Plus,
+            IconName::Quote,
+            IconName::RotateCcw,
             IconName::Settings,
+            IconName::SkipForward,
+            IconName::Sparkles,
             IconName::Sun,
+            IconName::Target,
+            IconName::Timer,
+            IconName::Trophy,
             IconName::X,
+            IconName::Zap,
         ] {
             let bytes = Assets.load(&name.path()).unwrap().unwrap();
             assert!(std::str::from_utf8(&bytes).unwrap().contains("<svg"));

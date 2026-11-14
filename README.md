@@ -2,7 +2,8 @@
 
 Desktop app for custom work tooling, built on [GPUI](https://gpui.rs/) (Zed's UI framework) via
 [GPUI Kit](https://gpui-kit.com) (GPUI + ready-made components, Lucide icons, JSON themes).
-First feature: a task list with categories, priorities and a done log.
+Aurora-styled UI (drifting glow, springy nav, animated progress) with a task list, a daily
+dashboard (greeting, streak, 7-day chart, progress ring) and a pomodoro Focus timer.
 
 ## Install / update
 
@@ -40,7 +41,8 @@ Bump `version` in `Cargo.toml` with each feature; it shows in the status bar and
 | File | Contents |
 |---|---|
 | `tasks.json` | Tasks + categories. Saved on every change, atomically. |
-| `settings.json` | Theme. |
+| `settings.json` | Theme, your name (greeting), ambient motion on/off. |
+| `focus.json` | Focus length + log of finished focus sessions. |
 
 An unreadable file is renamed `*.corrupt-<timestamp>.json`, never overwritten. When changing the
 format, add fields with `#[serde(default)]` (`src/tasks/model.rs`) so old files still load.
@@ -57,14 +59,29 @@ Type in the composer and press Enter. Inline tokens (anywhere in the text):
 
 Without tokens, the priority/category chips under the input apply. Hover a task for actions:
 drag the handle to reorder within a priority group (preview while dragging; saved on release), cycle priority, edit, delete (with Undo).
-Tick the checkbox to complete; Done groups by day.
+Tick the checkbox to complete (row slides out, a toast cheers you on); Done groups by day.
+The hero card above shows today's progress ring, your streak (consecutive days with a completion)
+and the last 7 days.
+
+## Focus
+
+Pomodoro timer: pick 15/25/45/60 min, Start (⌘⇧F from anywhere). Finished focus sessions are
+logged and followed by a 5-min break (15 min every 4th). A chime plays at the end of each phase.
+The sidebar shows the countdown while a session is active. "Up next" = your top open task.
+
+## Look
+
+Palette lives in `themes/workdesk.json`; `chart.1`–`chart.5` drive the brand gradient, glows and
+the ambient backdrop. Settings → Appearance → Ambient motion turns off the drifting glow and
+pulsing indicators (saves battery). macOS "Reduce motion" is honoured by every animation.
 
 ## Shortcuts
 
 | Keys | Action |
 |---|---|
 | ⌘N | New task (focus composer) |
-| ⌘1 / ⌘, | Tasks / Settings |
+| ⌘1 / ⌘2 / ⌘, | Tasks / Focus / Settings |
+| ⌘⇧F | Start/pause focus timer |
 | Enter / Esc | Add or save / cancel edit |
 | ⌘⇧T | Toggle light/dark |
 | ⌘W / ⌘Q | Close window (app stays in Dock) / Quit |
@@ -76,12 +93,15 @@ Tick the checkbox to complete; Done groups by day.
 | `src/main.rs` | App entry, window, Dock reopen |
 | `src/actions.rs` | Actions, key bindings, menu bar |
 | `src/storage.rs` | JSON load/save in the data dir |
-| `src/theme.rs` | Light/dark appearance (persisted) over gpui-kit's `Theme`; loads `themes/` |
+| `src/prefs.rs` | `settings.json` (appearance, name, ambient) as a global |
+| `src/theme.rs` | Light/dark appearance over gpui-kit's `Theme`; loads `themes/` |
+| `src/focus/` | `FocusTimer` entity (pomodoro state, `focus.json`) |
+| `src/quotes.rs` | Daily sidebar line + time-of-day greeting |
 | `themes/workdesk.json` | Light + dark palettes (hot-reloaded in debug builds) |
-| `src/workspace.rs` | Root view: sidebar, page content, status bar |
+| `src/workspace.rs` | Root view: aurora backdrop, title bar clock, sidebar, page transitions |
 | `src/tasks/` | Task model, quick-add parser, `TaskStore` entity |
 | `src/pages/` | One file per page; `Page` enum drives the sidebar |
-| `src/components/` | Thin wrappers over gpui-kit (`chip`, `icon_button`, `category_tag`, `card`) + icon `Assets` |
+| `src/components/` | Thin wrappers over gpui-kit (`chip`, `icon_button`, `category_tag`, `card`), icon `Assets`, `fx` (glow, gradients, ring, enter/pulse/float animations) |
 | `bacon.toml` | `make dev` rebuild/relaunch job |
 | `scripts/` | Icon generation, `.app` bundling, install |
 

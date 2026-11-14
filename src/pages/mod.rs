@@ -1,8 +1,10 @@
+mod focus;
 mod settings;
 mod tasks;
 
 use gpui_kit::assets::IconName;
 
+pub use focus::FocusPage;
 pub use settings::SettingsPage;
 pub use tasks::TasksPage;
 
@@ -10,15 +12,17 @@ pub use tasks::TasksPage;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
     Tasks,
+    Focus,
     Settings,
 }
 
 impl Page {
-    pub const ALL: [Page; 2] = [Page::Tasks, Page::Settings];
+    pub const ALL: [Page; 3] = [Page::Tasks, Page::Focus, Page::Settings];
 
     pub fn label(self) -> &'static str {
         match self {
             Page::Tasks => "Tasks",
+            Page::Focus => "Focus",
             Page::Settings => "Settings",
         }
     }
@@ -26,7 +30,16 @@ impl Page {
     pub fn icon(self) -> IconName {
         match self {
             Page::Tasks => IconName::ListTodo,
+            Page::Focus => IconName::Timer,
             Page::Settings => IconName::Settings,
+        }
+    }
+
+    pub fn shortcut(self) -> &'static str {
+        match self {
+            Page::Tasks => "⌘1",
+            Page::Focus => "⌘2",
+            Page::Settings => "⌘,",
         }
     }
 }

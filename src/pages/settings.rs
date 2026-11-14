@@ -4,14 +4,15 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState},
+    switch::Switch,
     tab::{Tab, TabBar},
     v_flex,
 };
 use gpui_kit::{Context, Entity, FontWeight, Subscription, Window, div, prelude::*, px, rgb};
 
 use crate::{
-    components::{card, icon_button},
-    storage,
+    components::{card, fx, icon_button},
+    prefs, storage,
     tasks::TaskStore,
     theme::{self, Appearance},
 };
@@ -21,6 +22,7 @@ const APPEARANCES: [Appearance; 2] = [Appearance::Light, Appearance::Dark];
 pub struct SettingsPage {
     store: Entity<TaskStore>,
     category_input: Entity<InputState>,
+    name_input: Entity<InputState>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -28,7 +30,25 @@ impl SettingsPage {
     pub fn new(store: Entity<TaskStore>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let category_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("New category name, then Enter"));
+        let name = prefs::get(cx).name.clone();
+        let name_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Your name, for the greeting")
+                .default_value(name)
+        });
         let subscriptions = vec![
+            cx.subscribe_in(
+                &name_input,
+                window,
+                |_, input, event: &InputEvent, _, cx| {
+                    if let InputEvent::Change = event {
+                        let name = input.read(cx).value().trim().to_string();
+                        if prefs::get(cx).name != name {
+                            prefs::update(cx, |p| p.name = name);
+                        }
+                    }
+                },
+            ),
             cx.observe(&store, |_, _, cx| cx.notify()),
             cx.subscribe_in(
                 &category_input,
@@ -46,11 +66,12 @@ impl SettingsPage {
         Self {
             store,
             category_input,
+            name_input,
             _subscriptions: subscriptions,
         }
     }
 
-    fn render_categories(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_categories(&self, cx: &mut Context<Self>) -> gpui_kit::Div {
         let theme = cx.theme().clone();
         let store = self.store.read(cx);
         let rows: Vec<_> = store
@@ -132,19 +153,44 @@ impl Render for SettingsPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let current = Appearance::current(cx);
+        let ambient = prefs::get(cx).ambient;
         let data_dir = storage::data_dir();
 
         v_flex()
             .gap_4()
             .max_w(px(640.))
             .child(
-                div()
-                    .text_2xl()
-                    .font_weight(FontWeight::BOLD)
-                    .child("Settings"),
+                v_flex()
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_3xl()
+                            .font_weight(FontWeight::BOLD)
+                            .child("Settings"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(theme.muted_foreground)
+                            .child("Make it yours."),
+                    ),
             )
-            .child(
-                card("Appearance", cx).child(
+            .child(fx::enter(
+                card("Profile", cx).child(
+                    div()
+                        .px_3()
+                        .py_1()
+                        .rounded_full()
+                        .bg(theme.background)
+                        .text_sm()
+                        .child(Input::new(&self.name_input).appearance(false)),
+                ),
+                "settings-profile",
+                0,
+            ))
+            .child(fx::enter(
+                card("Appearance", cx)
+                    .child(
                     h_flex().child(
                         TabBar::new("appearance")
                             .segmented()
@@ -155,10 +201,35 @@ impl Render for SettingsPage {
                             .children(APPEARANCES.map(|a| Tab::new().label(a.label())))
                             .on_click(|ix, _, cx| theme::set(APPEARANCES[*ix], cx)),
                     ),
-                ),
-            )
-            .child(self.render_categories(cx))
-            .child(
+                )
+                    .child(
+                        h_flex()
+                            .justify_between()
+                            .pt_2()
+                            .child(
+                                v_flex()
+                                    .child(div().text_sm().child("Ambient motion"))
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .child("Drifting glow and breathing indicators. Turn off to save battery."),
+                                    ),
+                            )
+                            .child(
+                                Switch::new("ambient")
+                                    .checked(ambient)
+                                    .on_click(|checked: &bool, _, cx| {
+                                        let checked = *checked;
+                                        prefs::update(cx, |p| p.ambient = checked);
+                                    }),
+                            ),
+                    ),
+                "settings-appearance",
+                1,
+            ))
+            .child(fx::enter(self.render_categories(cx), "settings-categories", 2))
+            .child(fx::enter(
                 card("Data", cx)
                     .child(
                         div()
@@ -178,6 +249,8 @@ impl Render for SettingsPage {
                                 }),
                         ),
                     ),
-            )
+                "settings-data",
+                3,
+            ))
     }
 }

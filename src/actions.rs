@@ -12,7 +12,9 @@ actions!(
         ToggleTheme,
         NewTask,
         ShowTasks,
+        ShowFocus,
         ShowSettings,
+        ToggleTimer,
     ]
 );
 
@@ -23,6 +25,8 @@ pub fn init(cx: &mut App) {
         bind("secondary-shift-t", ToggleTheme, cx),
         bind("secondary-n", NewTask, cx),
         bind("secondary-1", ShowTasks, cx),
+        bind("secondary-2", ShowFocus, cx),
+        bind("secondary-shift-f", ToggleTimer, cx),
         bind("secondary-,", ShowSettings, cx),
     ];
     cx.bind_keys(bindings);
@@ -40,11 +44,13 @@ pub fn init(cx: &mut App) {
         ]),
         Menu::new("File").items([
             MenuItem::action("New Task", NewTask),
+            MenuItem::action("Start/Pause Focus Timer", ToggleTimer),
             MenuItem::separator(),
             MenuItem::action("Close Window", CloseWindow),
         ]),
         Menu::new("View").items([
             MenuItem::action("Tasks", ShowTasks),
+            MenuItem::action("Focus", ShowFocus),
             MenuItem::action("Settings", ShowSettings),
             MenuItem::separator(),
             MenuItem::action("Toggle Light/Dark", ToggleTheme),

@@ -29,19 +29,22 @@ Done = `cargo fmt` + `cargo build` with **zero warnings** + `cargo test` green. 
 main.rs        gpui_kit::application(), gpui_kit::open_window (wraps view in kit Root), Dock reopen
 actions.rs     actions!(), key bindings (bind()), menu bar
 storage.rs     load/save JSON in data_dir()
-theme.rs       persisted Appearance → kit Theme; loads themes/workdesk.json (watched in debug)
-workspace.rs   root view: kit Sidebar | active page | status bar; owns Entity<TaskStore>
-tasks/         model.rs (Task, Category, Priority, TaskData, parse_quick_add) · store.rs (TaskStore entity)
+prefs.rs       settings.json (appearance, name, ambient) as a Global; prefs::update saves + repaints
+theme.rs       Appearance → kit Theme; loads themes/workdesk.json (watched in debug)
+workspace.rs   root view: aurora | TitleBar | custom sidebar | active page; owns TaskStore + FocusTimer
+tasks/         model.rs (Task, …, parse_quick_add, streak stats) · store.rs (TaskStore entity)
+focus/         FocusTimer entity (pomodoro, focus.json)
 pages/         one Render view per sidebar page; Page enum lists them
-components/    thin fn wrappers over kit components (chip, icon_button, category_tag, card) + icon Assets
+components/    thin fn wrappers over kit components + icon Assets; fx.rs = glow/gradient/ring/animations
 ```
 
 - **State**: one `Entity<TaskStore>` created in `Workspace::new`, cloned into pages. Pages `cx.observe(&store, …)` to re-render. All mutations go through `TaskStore` methods, which end in `commit()` (save + `cx.notify()`). Never mutate task data elsewhere.
 - **New page**: steps in README "Add a page". New feature with its own data → own module like `tasks/` with its own JSON file via `storage::{load, save}`.
 - **Imports**: `gpui_kit::*` is GPUI; components under `gpui_kit::component::*`; never add `gpui` as a direct dependency.
 - **Components**: use kit ones (`Button`, `Checkbox`, `Input`, `TabBar`, `Tag`, `Sidebar`, `Icon`, `h_flex`/`v_flex`, tooltips…) before hand-rolling. Kit source: `~/.cargo/registry/src/*/gpui-component-0.9.1/src`.
-- **Theme**: colors via `cx.theme()` (`gpui_kit::component::ActiveTheme`); our mapping: `group_box` = card/surface, `secondary` = row hover, `secondary_active` = selected, `primary` = accent, `muted_foreground` = secondary text. Change the palette in `themes/workdesk.json`, not in code. No hard-coded colors in views except data-driven ones (priority/category hex in `tasks/model.rs`). Don't mark our themes `is_default` (breaks hot reload).
-- **Style**: flat — no borders/shadows on surfaces (`"shadow": false` in theme); `rounded_2xl` cards, `rounded_xl` rows, pill (`ButtonRounded::Size(px(999.))`) buttons/chips.
+- **Theme**: colors via `cx.theme()` (`gpui_kit::component::ActiveTheme`); our mapping: `group_box` = card/surface (translucent so the aurora shows), `secondary` = row hover, `secondary_active` = selected, `primary` = accent, `muted_foreground` = secondary text, `chart_1`–`chart_5` = brand gradient/glow/stat accents (`fx::brand_gradient`, `fx::wash`). Change the palette in `themes/workdesk.json`, not in code. No hard-coded colors in views except data-driven ones (priority/category hex in `tasks/model.rs`). Don't mark our themes `is_default` (breaks hot reload).
+- **Style**: translucent surfaces with a hairline `theme.border`; no drop shadows, only colored glows via `fx::glow` (kit `"shadow": false`); `rounded_2xl` cards, `rounded_xl` rows, pill (`ButtonRounded::Size(px(999.))`) buttons/chips.
+- **Motion**: use `components::fx` (`enter` stagger, `ring`/`progress_bar` springs, `pulse`/`float`). Repeating animations must be gated on `prefs::get(cx).ambient` and set `with_max_fps` — each one redraws the whole window. `with_animation` state is keyed by element id: an id that disappears for a frame replays on return (used for page/row entrances).
 - **Icons**: `Icon::new(gpui_kit::assets::IconName::X).text_color(c)` — never text glyphs. Kit embeds ~100 component icons; any other Lucide icon must be added to `icon_assets!` in `components/assets.rs` (+ the test list) or it renders blank.
 - **Text entry**: `Entity<InputState>` (`InputState::new(window, cx).placeholder(..)`) rendered with `Input::new(&state)`. `cx.subscribe_in(&state, window, …)` for `InputEvent::PressEnter`; `value()`, `set_value(text, window, cx)`. Esc propagates as `component::input::Escape` — handle with `.on_action` on a parent.
 
@@ -63,6 +66,9 @@ API source of truth: `~/.cargo/registry/src/*/{gpui-pre-0.3.12,gpui-base-0.9.1,g
 | Focus during window construction is dropped | `cx.defer_in(window, …)` (see `Workspace::new`) |
 | `FocusHandle::focus` / `InputState::set_value` need `window, cx` | thread `window` through; subscribe with `subscribe_in` |
 | macOS build needs full Xcode `metal` | not needed: gpui-kit enables `runtime_shaders` |
+| Window chrome | transparent title bar (`TitleBar::title_bar_options` + `TitleBar::window_options`); kit `TitleBar` owns dragging, so keep it rendered at the top |
+| Focus state of an `InputState` | `entity.focus_handle(cx)` needs `gpui_kit::Focusable` in scope |
+| `BoxShadow` literal | needs `inset: false` |
 | `on_reopen` isn't on `App` | call on `Application` before `.run()` (see `main.rs`) |
 | Closure in `.map()` needs `cx` → "captured variable cannot escape `FnMut`" | take `cx: &Context<Self>` (not `&mut`) in render helpers; `cx.listener` only needs `&` |
 | Borrow conflict reading theme then calling `cx.listener` | `let theme = cx.theme().clone();` at top of render |

@@ -1,4 +1,6 @@
-use chrono::{DateTime, Local, NaiveDate, Utc};
+use std::time::Duration;
+
+use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     ActiveTheme, Icon, Sizable, Theme,
@@ -10,14 +12,33 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, Context, DragMoveEvent, Entity, FontWeight, Hsla, Render, SharedString,
-    Subscription, Window, div, prelude::*, px, rgb,
+    Animation, AnimationExt, AnyElement, App, Context, DragMoveEvent, Entity, Focusable,
+    FontWeight, Hsla, Render, SharedString, SpringAnimation, Subscription, Window, div,
+    ease_in_out, prelude::*, px, rgb,
 };
 
 use crate::{
-    components::{category_tag, chip, icon_button},
-    tasks::{Category, Id, Priority, Task, TaskStore, parse_quick_add},
+    components::{category_tag, chip, fx, icon_button},
+    prefs, quotes,
+    tasks::{
+        Category, Id, Priority, Task, TaskStore, completions_by_day, last_days, parse_quick_add,
+        streak,
+    },
 };
+
+const COMPLETE_MS: u64 = 520;
+const TOAST_SECS: u64 = 4;
+const CHART_DAYS: usize = 7;
+const CHART_H: f32 = 64.;
+
+/// Numbers shown in the hero, computed once per render.
+struct Stats {
+    open: usize,
+    done_today: usize,
+    urgent: usize,
+    streak: usize,
+    week: Vec<usize>,
+}
 
 const VIEWS: [View; 2] = [View::Todo, View::Done];
 
@@ -37,6 +58,10 @@ pub struct TasksPage {
     editing: Option<Id>,
     last_deleted: Option<Task>,
     drag_session: Option<DragSession>,
+    /// Ticked tasks playing their exit animation before they move to Done.
+    completing: Vec<Id>,
+    toast: Option<(u64, SharedString)>,
+    _toast_timer: Option<gpui_kit::Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -105,8 +130,7 @@ impl Render for TaskDragPreview {
 impl TasksPage {
     pub fn new(store: Entity<TaskStore>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let composer = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("Add a task…   #category  !high   ·   \\# \\! for literal # and !")
+            InputState::new(window, cx).placeholder("What needs doing?   #category  !high")
         });
         let subscriptions = vec![
             cx.observe(&store, |_, _, cx| cx.notify()),
@@ -130,6 +154,9 @@ impl TasksPage {
             editing: None,
             last_deleted: None,
             drag_session: None,
+            completing: Vec::new(),
+            toast: None,
+            _toast_timer: None,
             _subscriptions: subscriptions,
         }
     }
@@ -248,6 +275,55 @@ impl TasksPage {
             .into_any_element()
     }
 
+    /// Plays the exit animation, then marks the task done and celebrates.
+    fn complete(&mut self, id: Id, cx: &mut Context<Self>) {
+        if self.completing.contains(&id) {
+            return;
+        }
+        self.completing.push(id);
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(COMPLETE_MS))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.completing.retain(|c| *c != id);
+                this.store.update(cx, |store, cx| store.toggle_done(id, cx));
+                this.celebrate(cx);
+            });
+        })
+        .detach();
+    }
+
+    fn celebrate(&mut self, cx: &mut Context<Self>) {
+        let by_day = completions_by_day(self.store.read(cx).tasks());
+        let today = Local::now().date_naive();
+        let n = by_day.get(&today).copied().unwrap_or(0);
+        let open = self.store.read(cx).open_count();
+        let message = match (n, open) {
+            (_, 0) => "Everything's done. Take a breath — you earned it.".to_string(),
+            (1, _) => "First one down. Momentum!".to_string(),
+            (3, _) => "Hat trick — three done today.".to_string(),
+            (5, _) => "Five today. You're on fire.".to_string(),
+            (10, _) => "Ten today?! Legendary.".to_string(),
+            (n, _) => format!("Nice! {n} done today."),
+        };
+        let nonce = self.toast.as_ref().map_or(1, |(n, _)| n + 1);
+        self.toast = Some((nonce, message.into()));
+        self._toast_timer = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_secs(TOAST_SECS))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.toast.as_ref().is_some_and(|(n, _)| *n == nonce) {
+                    this.toast = None;
+                    cx.notify();
+                }
+            });
+        }));
+        cx.notify();
+    }
+
     pub fn focus_composer(&self, window: &mut Window, cx: &mut Context<Self>) {
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
@@ -335,43 +411,246 @@ impl TasksPage {
         cx.notify();
     }
 
-    fn render_header(
-        &self,
-        open: usize,
-        done_today: usize,
-        urgent: usize,
-        theme: &Theme,
-    ) -> impl IntoElement {
+    fn stats(open: &[Task], done: &[Task]) -> Stats {
+        let today = Local::now().date_naive();
+        let by_day = completions_by_day(done);
+        Stats {
+            open: open.len(),
+            done_today: by_day.get(&today).copied().unwrap_or(0),
+            urgent: open
+                .iter()
+                .filter(|t| t.priority == Priority::Urgent)
+                .count(),
+            streak: streak(&by_day, today),
+            week: last_days(&by_day, today, CHART_DAYS),
+        }
+    }
+
+    fn render_hero(&self, stats: &Stats, theme: &Theme, cx: &App) -> impl IntoElement {
+        let name = prefs::get(cx).name.trim().to_string();
+        let greeting = if name.is_empty() {
+            format!("{}.", quotes::greeting())
+        } else {
+            format!("{}, {name}.", quotes::greeting())
+        };
+        let subtitle = match (stats.open, stats.urgent) {
+            (0, _) => "Inbox zero. Beautiful.".to_string(),
+            (_, 0) => format!(
+                "{} open · {} done today. Pick one and go.",
+                stats.open, stats.done_today
+            ),
+            (_, 1) => "1 urgent task waiting — knock it out first.".to_string(),
+            (_, n) => format!("{n} urgent tasks waiting — start at the top."),
+        };
+        let total = stats.open + stats.done_today;
+        let fraction = if total == 0 {
+            0.
+        } else {
+            stats.done_today as f32 / total as f32
+        };
+
+        let pill = |icon: IconName, color: Hsla, label: String| {
+            h_flex()
+                .gap_1p5()
+                .px_2p5()
+                .py_1()
+                .rounded_full()
+                .bg(color.opacity(0.14))
+                .text_xs()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(color)
+                .child(Icon::new(icon).xsmall().text_color(color))
+                .child(label)
+        };
+
         h_flex()
-            .items_end()
-            .justify_between()
+            .gap_8()
+            .p_6()
+            .rounded_2xl()
+            .bg(fx::wash(theme, 0.20))
+            .border_1()
+            .border_color(theme.border)
             .child(
                 v_flex()
-                    .gap_1()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_2()
                     .child(
                         div()
-                            .text_2xl()
+                            .text_xs()
                             .font_weight(FontWeight::BOLD)
-                            .child("Tasks"),
+                            .text_color(theme.primary)
+                            .child(
+                                Local::now()
+                                    .format("%A · %B %-d")
+                                    .to_string()
+                                    .to_uppercase(),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_3xl()
+                            .font_weight(FontWeight::BOLD)
+                            .child(greeting),
                     )
                     .child(
                         div()
                             .text_sm()
                             .text_color(theme.muted_foreground)
-                            .child(format!("{open} open  ·  {done_today} done today")),
+                            .child(subtitle),
+                    )
+                    .child(
+                        h_flex()
+                            .flex_wrap()
+                            .gap_2()
+                            .pt_2()
+                            .child(pill(
+                                IconName::Flame,
+                                theme.chart_4,
+                                match stats.streak {
+                                    0 => "No streak yet".into(),
+                                    n => format!("{n}-day streak"),
+                                },
+                            ))
+                            .child(pill(
+                                IconName::Zap,
+                                theme.chart_5,
+                                format!("{} done today", stats.done_today),
+                            ))
+                            .when(stats.urgent > 0, |this| {
+                                this.child(pill(
+                                    IconName::Flag,
+                                    hex(Priority::Urgent.color()),
+                                    format!("{} urgent", stats.urgent),
+                                ))
+                            }),
                     ),
             )
-            .when(urgent > 0, |this| {
-                let red = hex(Priority::Urgent.color());
-                this.child(
-                    category_tag(format!("{urgent} urgent"), red).font_weight(FontWeight::SEMIBOLD),
-                )
-            })
+            .child(self.render_week(&stats.week, theme))
+            .child(
+                fx::ring_box(112.)
+                    .child(fx::ring(
+                        "hero-ring",
+                        fraction,
+                        112.,
+                        10.,
+                        fx::brand_pair(theme),
+                        theme,
+                    ))
+                    .child(
+                        v_flex()
+                            .items_center()
+                            .child(
+                                div()
+                                    .text_xl()
+                                    .font_weight(FontWeight::BOLD)
+                                    .child(format!("{}%", (fraction * 100.).round() as u32)),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child("of today"),
+                            ),
+                    ),
+            )
     }
 
-    fn render_composer(&self, categories: &[Category], cx: &mut Context<Self>) -> impl IntoElement {
+    /// Completions over the last week as springy bars; today glows.
+    fn render_week(&self, week: &[usize], theme: &Theme) -> impl IntoElement {
+        let max = week.iter().copied().max().unwrap_or(0).max(1) as f32;
+        let today = Local::now().date_naive();
+        let bars = week.iter().enumerate().map(|(ix, n)| {
+            let is_today = ix == week.len() - 1;
+            let day = today - chrono::Days::new((week.len() - 1 - ix) as u64);
+            let height = (*n as f32 / max * CHART_H).max(4.);
+            let bar = div()
+                .w(px(10.))
+                .rounded_full()
+                .when(is_today, |this| {
+                    this.bg(fx::brand_gradient(theme, 180.)).shadow(fx::glow(
+                        theme.chart_1.opacity(0.5),
+                        12.,
+                        0.,
+                    ))
+                })
+                .when(!is_today, |this| this.bg(theme.chart_1.opacity(0.28)))
+                .with_spring(
+                    ("week-bar", ix as u64),
+                    SpringAnimation::new(fx::SPRING).to(px(height)).from(px(0.)),
+                    |el, h| el.h(h),
+                );
+            v_flex()
+                .items_center()
+                .gap_1()
+                .child(
+                    div()
+                        .h(px(CHART_H))
+                        .flex()
+                        .flex_col()
+                        .justify_end()
+                        .child(bar),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(if is_today {
+                            theme.foreground
+                        } else {
+                            theme.muted_foreground
+                        })
+                        .child(
+                            day.weekday()
+                                .to_string()
+                                .chars()
+                                .next()
+                                .unwrap_or(' ')
+                                .to_string(),
+                        ),
+                )
+        });
+        v_flex()
+            .flex_none()
+            .gap_2()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child("Last 7 days"),
+            )
+            .child(h_flex().items_end().gap_2().children(bars))
+    }
+
+    fn render_toast(&self, theme: &Theme) -> Option<impl IntoElement> {
+        let (nonce, message) = self.toast.clone()?;
+        let toast = h_flex()
+            .gap_2()
+            .px_4()
+            .py_2()
+            .rounded_full()
+            .bg(fx::brand_gradient(theme, 90.))
+            .shadow(fx::glow(theme.chart_1.opacity(0.4), 20., 0.))
+            .text_sm()
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(theme.primary_foreground)
+            .child(Icon::new(IconName::Sparkles).text_color(theme.primary_foreground))
+            .child(message);
+        Some(
+            h_flex()
+                .justify_center()
+                .child(fx::enter(toast, ("toast", nonce), 0)),
+        )
+    }
+
+    fn render_composer(
+        &self,
+        categories: &[Category],
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let theme = cx.theme().clone();
         let editing = self.editing.is_some();
+        let focused = self.composer.focus_handle(cx).contains_focused(window, cx);
 
         let priority_chips = Priority::ALL.into_iter().map(|priority| {
             chip(
@@ -408,22 +687,36 @@ impl TasksPage {
             .rounded_2xl()
             .bg(theme.group_box)
             .border_1()
-            .border_color(if editing {
-                theme.primary
+            .border_color(if editing || focused {
+                theme.primary.opacity(0.55)
             } else {
-                theme.transparent
+                theme.border
+            })
+            .when(focused, |this| {
+                this.shadow(fx::glow(theme.primary.opacity(0.22), 28., 0.))
             })
             .on_action(cx.listener(|this, _: &Escape, window, cx| this.cancel_edit(window, cx)))
             .child(
                 h_flex()
                     .gap_3()
                     .child(
-                        Icon::new(if editing {
-                            IconName::Pencil
-                        } else {
-                            IconName::Plus
-                        })
-                        .text_color(theme.muted_foreground),
+                        div()
+                            .flex()
+                            .flex_none()
+                            .items_center()
+                            .justify_center()
+                            .size(px(28.))
+                            .rounded_full()
+                            .bg(fx::brand_gradient(&theme, 135.))
+                            .child(
+                                Icon::new(if editing {
+                                    IconName::Pencil
+                                } else {
+                                    IconName::Plus
+                                })
+                                .small()
+                                .text_color(theme.primary_foreground),
+                            ),
                     )
                     .child(
                         div()
@@ -580,31 +873,37 @@ impl TasksPage {
         if tasks.is_empty() {
             let (glyph, message) = match (self.view, self.filter.is_some()) {
                 (View::Todo, false) => (
-                    IconName::Sun,
+                    IconName::Sparkles,
                     "All clear. Add something above when it comes up.",
                 ),
                 (View::Todo, true) => (IconName::Sun, "Nothing open in this category."),
                 (View::Done, _) => (IconName::ListTodo, "Completed tasks will show up here."),
             };
+            let ambient = prefs::get(cx).ambient;
+            let badge = h_flex()
+                .justify_center()
+                .size(px(72.))
+                .rounded_full()
+                .bg(fx::brand_gradient(&theme, 135.))
+                .shadow(fx::glow(theme.chart_1.opacity(0.4), 36., 0.))
+                .child(
+                    Icon::new(glyph)
+                        .text_color(theme.primary_foreground)
+                        .size_8(),
+                );
             return v_flex()
                 .items_center()
                 .justify_center()
-                .gap_3()
+                .gap_4()
                 .py_16()
                 .text_color(theme.muted_foreground)
-                .child(
-                    h_flex()
-                        .justify_center()
-                        .size(px(56.))
-                        .rounded_full()
-                        .bg(theme.group_box)
-                        .child(Icon::new(glyph).text_color(theme.muted_foreground).size_6()),
-                )
+                .child(fx::float(badge, "empty-badge", ambient))
                 .child(div().text_sm().child(message))
                 .into_any_element();
         }
 
         let mut section_elements = Vec::new();
+        let mut row_ix = 0;
         for section in self.sections(tasks) {
             let mut task_rows = Vec::new();
             let band_rows = if reorderable {
@@ -627,28 +926,44 @@ impl TasksPage {
                         let category = task
                             .category
                             .and_then(|id| categories.iter().find(|c| c.id == id));
+                        let id = task.id;
+                        let row = self.render_row(&task, category, reorderable, cx);
                         task_rows.push(
-                            self.render_row(&task, category, reorderable, cx)
-                                .into_any_element(),
+                            fx::enter(div().child(row), ("row-in", id), row_ix).into_any_element(),
                         );
+                        row_ix += 1;
                     }
                 }
             }
             section_elements.push(
                 v_flex()
+                    .gap_1()
                     .child(
                         h_flex()
                             .gap_2()
                             .px_3()
                             .pb_1()
                             .text_xs()
-                            .font_weight(FontWeight::SEMIBOLD)
+                            .font_weight(FontWeight::BOLD)
                             .text_color(theme.muted_foreground)
                             .when_some(section.color, |this, color| {
-                                this.child(div().size_2().rounded_full().bg(color))
+                                this.child(
+                                    div().size_2().rounded_full().bg(color).shadow(fx::glow(
+                                        color.opacity(0.7),
+                                        8.,
+                                        0.,
+                                    )),
+                                )
                             })
                             .child(section.title.to_uppercase())
-                            .child(div().opacity(0.7).child(section.tasks.len().to_string())),
+                            .child(
+                                div()
+                                    .px_1p5()
+                                    .rounded_full()
+                                    .bg(theme.secondary)
+                                    .child(section.tasks.len().to_string()),
+                            )
+                            .child(div().flex_1().h(px(1.)).ml_2().bg(theme.border)),
                     )
                     .children(task_rows)
                     .into_any_element(),
@@ -678,10 +993,12 @@ impl TasksPage {
         category: Option<&Category>,
         reorderable: bool,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> AnyElement {
         let theme = cx.theme().clone();
+        let ambient = prefs::get(cx).ambient;
         let id = task.id;
         let done = task.is_done();
+        let completing = self.completing.contains(&id);
         let priority = task.priority;
         let group = SharedString::from(format!("task-row-{id}"));
         let hover = theme.secondary;
@@ -691,10 +1008,33 @@ impl TasksPage {
         };
 
         let checkbox = Checkbox::new(("check", id))
-            .checked(done)
+            .checked(done || completing)
             .on_click(cx.listener(move |this, _: &bool, _, cx| {
-                this.store.update(cx, |store, cx| store.toggle_done(id, cx));
+                if done {
+                    this.store.update(cx, |store, cx| store.toggle_done(id, cx));
+                } else {
+                    this.complete(id, cx);
+                }
             }));
+
+        let stripe_color = if done {
+            theme.success
+        } else {
+            hex(priority.color())
+        };
+        let stripe = div()
+            .flex_none()
+            .w(px(3.))
+            .h(px(18.))
+            .rounded_full()
+            .bg(stripe_color)
+            .shadow(fx::glow(stripe_color.opacity(0.6), 8., 0.));
+        let stripe = fx::pulse(
+            stripe,
+            ("urgent-pulse", id),
+            ambient && !done && priority == Priority::Urgent,
+            0.35,
+        );
 
         let actions = h_flex()
             .flex_none()
@@ -763,12 +1103,14 @@ impl TasksPage {
             .group(group)
             .gap_1p5()
             .px_3()
-            .py_1()
+            .py_1p5()
             .rounded_xl()
             .when(self.editing == Some(id), |this| {
                 this.bg(theme.secondary_active)
             })
+            .when(completing, |this| this.bg(theme.success.opacity(0.12)))
             .hover(move |s| s.bg(hover))
+            .child(stripe)
             .when_some(drag_handle, |this, handle| this.child(handle))
             .child(checkbox);
         if reorderable {
@@ -792,34 +1134,49 @@ impl TasksPage {
                 },
             ));
         }
-        row.child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .text_sm()
-                .when(done, |this| {
-                    this.line_through().text_color(theme.muted_foreground)
-                })
-                .child(task.title.clone()),
-        )
-        .when_some(category, |this, category| {
-            this.child(category_tag(category.name.clone(), hex(category.color)).flex_none())
-        })
-        .child(
-            div()
-                .flex_none()
-                .w(px(40.))
-                .text_right()
-                .text_xs()
-                .text_color(theme.muted_foreground)
-                .child(meta),
-        )
-        .child(actions)
+        let row = row
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_sm()
+                    .when(done || completing, |this| {
+                        this.line_through().text_color(theme.muted_foreground)
+                    })
+                    .child(task.title.clone()),
+            )
+            .when_some(category, |this, category| {
+                this.child(category_tag(category.name.clone(), hex(category.color)).flex_none())
+            })
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(40.))
+                    .text_right()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(meta),
+            )
+            .child(actions);
+
+        if completing {
+            row.with_animation(
+                ("completing", id),
+                Animation::new(Duration::from_millis(COMPLETE_MS)).with_easing(ease_in_out),
+                |el, t| {
+                    let fade = ((t - 0.35) / 0.65).clamp(0., 1.);
+                    el.opacity(1. - fade).relative().left(px(fade * 28.))
+                },
+            )
+            .into_any_element()
+        } else {
+            row.into_any_element()
+        }
     }
 }
 
 impl Render for TasksPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.complete_drag_if_finished(cx);
         let theme = cx.theme().clone();
         let store = self.store.read(cx);
@@ -828,18 +1185,7 @@ impl Render for TasksPage {
         let (done, open): (Vec<Task>, Vec<Task>) =
             store.tasks().iter().cloned().partition(Task::is_done);
 
-        let today = Local::now().date_naive();
-        let done_today = done
-            .iter()
-            .filter(|t| {
-                t.completed_at
-                    .is_some_and(|ts| ts.with_timezone(&Local).date_naive() == today)
-            })
-            .count();
-        let urgent = open
-            .iter()
-            .filter(|t| t.priority == Priority::Urgent)
-            .count();
+        let stats = Self::stats(&open, &done);
         let (open_count, done_count) = (open.len(), done.len());
 
         let in_view = match self.view {
@@ -862,7 +1208,7 @@ impl Render for TasksPage {
 
         v_flex()
             .gap_5()
-            .child(self.render_header(open_count, done_today, urgent, &theme))
+            .child(self.render_hero(&stats, &theme, cx))
             .when_some(save_error, |this, error| {
                 this.child(
                     div()
@@ -875,7 +1221,8 @@ impl Render for TasksPage {
                         .child(error),
                 )
             })
-            .child(self.render_composer(&categories, cx))
+            .child(self.render_composer(&categories, window, cx))
+            .children(self.render_toast(&theme))
             .child(self.render_toolbar(open_count, done_count, &categories, &counts, cx))
             .when_some(self.last_deleted.as_ref(), |this, task| {
                 this.child(

@@ -1,49 +1,78 @@
-//! Root view of the main window: sidebar navigation, page content and status bar.
+//! Root view of the main window: ambient backdrop, title bar, sidebar and the active page.
 
-use gpui_kit::component::{
-    ActiveTheme, h_flex,
-    sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
-    v_flex,
-};
+use std::time::Duration;
+
+use chrono::Local;
+use gpui_kit::component::{ActiveTheme, Icon, Sizable, Theme, TitleBar, h_flex, v_flex};
 use gpui_kit::{
-    AnyView, Context, Entity, FocusHandle, FontWeight, Subscription, Window, div, prelude::*, px,
+    AnimationExt, AnyView, Context, Entity, FocusHandle, FontWeight, SharedString, SpringAnimation,
+    Subscription, Task, Window, assets::IconName, div, prelude::*, px,
 };
 
 use crate::{
     APP_NAME,
-    actions::{CloseWindow, NewTask, ShowSettings, ShowTasks},
-    components::category_tag,
-    pages::{Page, SettingsPage, TasksPage},
-    storage,
-    tasks::TaskStore,
-    theme::Appearance,
+    actions::{CloseWindow, NewTask, ShowFocus, ShowSettings, ShowTasks, ToggleTimer},
+    components::{
+        fx::{self, SPRING},
+        icon_button,
+    },
+    focus::FocusTimer,
+    pages::{FocusPage, Page, SettingsPage, TasksPage},
+    prefs, quotes,
+    tasks::{TaskStore, completions_by_day, streak},
+    theme::{self, Appearance},
 };
+
+const NAV_ITEM_H: f32 = 40.;
+const NAV_GAP: f32 = 4.;
 
 pub struct Workspace {
     focus_handle: FocusHandle,
     active: Page,
     store: Entity<TaskStore>,
+    timer: Entity<FocusTimer>,
     tasks: Entity<TasksPage>,
+    focus: Entity<FocusPage>,
     settings: Entity<SettingsPage>,
+    _clock: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl Workspace {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let store = cx.new(TaskStore::load);
+        let timer = cx.new(FocusTimer::load);
         let tasks = cx.new(|cx| TasksPage::new(store.clone(), window, cx));
+        let focus = cx.new(|cx| FocusPage::new(timer.clone(), store.clone(), cx));
         let settings = cx.new(|cx| SettingsPage::new(store.clone(), window, cx));
         // Focusing during window construction is dropped; wait until the window exists.
         cx.defer_in(window, |this, window, cx| {
             this.navigate(Page::Tasks, window, cx)
         });
+        // Keeps the title-bar clock and greeting current.
+        let clock = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_secs(15))
+                    .await;
+                if this.update(cx, |_, cx| cx.notify()).is_err() {
+                    break;
+                }
+            }
+        });
 
         Self {
             focus_handle: cx.focus_handle(),
             active: Page::Tasks,
-            _subscriptions: vec![cx.observe(&store, |_, _, cx| cx.notify())],
+            _subscriptions: vec![
+                cx.observe(&store, |_, _, cx| cx.notify()),
+                cx.observe(&timer, |_, _, cx| cx.notify()),
+            ],
+            _clock: clock,
             store,
+            timer,
             tasks,
+            focus,
             settings,
         }
     }
@@ -54,7 +83,7 @@ impl Workspace {
             Page::Tasks => self
                 .tasks
                 .update(cx, |tasks, cx| tasks.focus_composer(window, cx)),
-            Page::Settings => self.focus_handle.focus(window, cx),
+            Page::Focus | Page::Settings => self.focus_handle.focus(window, cx),
         }
         cx.notify();
     }
@@ -62,65 +91,305 @@ impl Workspace {
     fn active_view(&self) -> AnyView {
         match self.active {
             Page::Tasks => self.tasks.clone().into(),
+            Page::Focus => self.focus.clone().into(),
             Page::Settings => self.settings.clone().into(),
         }
     }
 
-    fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let open = self.store.read(cx).open_count();
-        let accent = cx.theme().primary;
-
-        Sidebar::new("sidebar")
-            .w(px(200.))
-            .header(
-                div()
-                    .px_2()
-                    .py_1()
-                    .text_lg()
-                    .font_weight(FontWeight::BOLD)
-                    .child(APP_NAME),
-            )
+    fn render_title_bar(&self, theme: &Theme) -> impl IntoElement {
+        let now = Local::now();
+        TitleBar::new()
+            .bg(theme.transparent)
+            .border_b_0()
+            .child(div())
             .child(
-                SidebarMenu::new().children(Page::ALL.into_iter().map(|page| {
-                    let badge = (page == Page::Tasks && open > 0).then(|| open.to_string());
-                    SidebarMenuItem::new(page.label())
-                        .icon(page.icon())
-                        .active(page == self.active)
-                        .on_click(
-                            cx.listener(move |this, _, window, cx| this.navigate(page, window, cx)),
-                        )
-                        .when_some(badge, |this, badge| {
-                            this.suffix(move |_, _| category_tag(badge.clone(), accent))
-                        })
-                })),
+                h_flex()
+                    .pr_4()
+                    .gap_2()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(now.format("%A, %B %-d").to_string())
+                    .child(div().size_1().rounded_full().bg(theme.muted_foreground))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.foreground)
+                            .child(now.format("%H:%M").to_string()),
+                    ),
             )
     }
 
-    fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let appearance = Appearance::current(cx).label();
-
+    fn render_brand(&self, theme: &Theme, ambient: bool) -> impl IntoElement {
+        let mark = div()
+            .flex()
+            .items_center()
+            .justify_center()
+            .size(px(36.))
+            .rounded_xl()
+            .bg(fx::brand_gradient(theme, 135.))
+            .shadow(fx::glow(theme.chart_1.opacity(0.45), 18., 0.))
+            .child(
+                Icon::new(IconName::Sparkles)
+                    .text_color(theme.primary_foreground)
+                    .size_5(),
+            );
         h_flex()
+            .gap_3()
+            .px_2()
+            .child(fx::float(mark, "brand-mark", ambient))
+            .child(
+                v_flex()
+                    .child(
+                        div()
+                            .text_base()
+                            .font_weight(FontWeight::BOLD)
+                            .child(APP_NAME),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(format!("v{}", env!("CARGO_PKG_VERSION"))),
+                    ),
+            )
+    }
+
+    fn render_nav(&self, theme: &Theme, ambient: bool, cx: &mut Context<Self>) -> impl IntoElement {
+        let open = self.store.read(cx).open_count();
+        let timer = self.timer.read(cx);
+        let timer_label = timer.is_active().then(|| timer.clock());
+        let timer_running = timer.is_running();
+        let active_ix = Page::ALL
+            .iter()
+            .position(|p| *p == self.active)
+            .unwrap_or(0);
+
+        let indicator = div()
+            .absolute()
+            .left_0()
+            .right_0()
+            .h(px(NAV_ITEM_H))
+            .rounded_xl()
+            .bg(theme.secondary_active)
+            .child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top(px(10.))
+                    .w(px(3.))
+                    .h(px(NAV_ITEM_H - 20.))
+                    .rounded_full()
+                    .bg(fx::brand_gradient(theme, 180.))
+                    .shadow(fx::glow(theme.chart_1.opacity(0.6), 10., 0.)),
+            )
+            .with_spring(
+                "nav-indicator",
+                SpringAnimation::new(SPRING).to(px(active_ix as f32 * (NAV_ITEM_H + NAV_GAP))),
+                |el, top| el.top(top),
+            );
+
+        let items = Page::ALL.into_iter().map(|page| {
+            let active = page == self.active;
+            let suffix: Option<gpui_kit::AnyElement> = match page {
+                Page::Tasks if open > 0 => Some(
+                    div()
+                        .px_2()
+                        .rounded_full()
+                        .bg(theme.primary.opacity(0.18))
+                        .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme.primary)
+                        .child(open.to_string())
+                        .into_any_element(),
+                ),
+                Page::Focus => timer_label.clone().map(|label| {
+                    let dot = div().size_1p5().rounded_full().bg(theme.chart_3);
+                    h_flex()
+                        .gap_1p5()
+                        .px_2()
+                        .rounded_full()
+                        .bg(theme.chart_3.opacity(0.16))
+                        .text_xs()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme.chart_3)
+                        .child(fx::pulse(dot, "timer-dot", ambient && timer_running, 0.25))
+                        .child(label)
+                        .into_any_element()
+                }),
+                _ => None,
+            };
+            let group = SharedString::from(format!("nav-{}", page.label()));
+            let shortcut = suffix.is_none().then(|| {
+                div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .opacity(0.)
+                    .group_hover(group.clone(), |s| s.opacity(1.))
+                    .child(page.shortcut())
+            });
+            h_flex()
+                .id(group.clone())
+                .group(group)
+                .relative()
+                .h(px(NAV_ITEM_H))
+                .gap_3()
+                .px_3()
+                .rounded_xl()
+                .cursor_pointer()
+                .text_sm()
+                .when(!active, |this| {
+                    this.text_color(theme.muted_foreground)
+                        .hover(|s| s.bg(theme.secondary))
+                })
+                .when(active, |this| {
+                    this.text_color(theme.foreground)
+                        .font_weight(FontWeight::SEMIBOLD)
+                })
+                .child(Icon::new(page.icon()).text_color(if active {
+                    theme.primary
+                } else {
+                    theme.muted_foreground
+                }))
+                .child(div().flex_1().child(page.label()))
+                .children(suffix)
+                .children(shortcut)
+                .on_click(cx.listener(move |this, _, window, cx| this.navigate(page, window, cx)))
+        });
+
+        div()
+            .relative()
+            .child(indicator)
+            .child(v_flex().gap(px(NAV_GAP)).children(items))
+    }
+
+    fn render_today_card(&self, theme: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
+        let store = self.store.read(cx);
+        let today = Local::now().date_naive();
+        let by_day = completions_by_day(store.tasks());
+        let done_today = by_day.get(&today).copied().unwrap_or(0);
+        let open = store.open_count();
+        let streak = streak(&by_day, today);
+        let total = done_today + open;
+        let fraction = if total == 0 {
+            0.
+        } else {
+            done_today as f32 / total as f32
+        };
+
+        v_flex()
+            .gap_2()
+            .p_3()
+            .rounded_2xl()
+            .bg(fx::wash(theme, 0.16))
+            .child(
+                h_flex()
+                    .justify_between()
+                    .text_xs()
+                    .child(div().font_weight(FontWeight::SEMIBOLD).child("Today"))
+                    .child(
+                        div()
+                            .text_color(theme.muted_foreground)
+                            .child(format!("{done_today}/{total}")),
+                    ),
+            )
+            .child(fx::progress_bar("sidebar-progress", fraction, theme))
+            .child(
+                h_flex()
+                    .gap_1()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(
+                        Icon::new(IconName::Flame)
+                            .xsmall()
+                            .text_color(if streak > 0 {
+                                theme.chart_4
+                            } else {
+                                theme.muted_foreground
+                            }),
+                    )
+                    .child(match streak {
+                        0 => "Start a streak today".to_string(),
+                        1 => "1-day streak".to_string(),
+                        n => format!("{n}-day streak"),
+                    }),
+            )
+    }
+
+    fn render_sidebar(&self, theme: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
+        let ambient = prefs::get(cx).ambient;
+        let dark = Appearance::current(cx) == Appearance::Dark;
+
+        v_flex()
             .flex_none()
-            .justify_between()
-            .h_6()
-            .px_3()
-            .bg(theme.status_bar)
-            .text_xs()
-            .text_color(theme.muted_foreground)
-            .child(format!("{APP_NAME} v{}", env!("CARGO_PKG_VERSION")))
-            .child(format!(
-                "⌘N new task  ·  ⌘⇧T theme ({appearance})  ·  data: {}",
-                storage::data_dir().display()
-            ))
+            .w(px(236.))
+            .ml_3()
+            .mb_3()
+            .p_3()
+            .gap_5()
+            .rounded_2xl()
+            .bg(theme.sidebar)
+            .border_1()
+            .border_color(theme.border)
+            .child(self.render_brand(theme, ambient))
+            .child(self.render_nav(theme, ambient, cx))
+            .child(div().flex_1())
+            .child(self.render_today_card(theme, cx))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_start()
+                    .px_1()
+                    .child(
+                        Icon::new(IconName::Quote)
+                            .xsmall()
+                            .flex_none()
+                            .mt_0p5()
+                            .text_color(theme.chart_1),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .italic()
+                            .text_color(theme.muted_foreground)
+                            .child(quotes::today()),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .justify_between()
+                    .px_1()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child("⌘N new · ⌘⇧F focus")
+                    .child(
+                        icon_button(
+                            "toggle-theme",
+                            if dark { IconName::Sun } else { IconName::Moon },
+                            theme.muted_foreground,
+                            "Toggle light/dark (⌘⇧T)",
+                        )
+                        .on_click(|_, _, cx| theme::toggle(cx)),
+                    ),
+            )
     }
 }
 
 impl Render for Workspace {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
+        let ambient = prefs::get(cx).ambient;
+        let page_id = self.active as u64;
 
-        v_flex()
+        let page = div()
+            .w_full()
+            .max_w(px(920.))
+            .mx_auto()
+            .px_10()
+            .pt_4()
+            .pb_12()
+            .child(self.active_view());
+
+        div()
             .id("workspace")
             .track_focus(&self.focus_handle)
             .on_action(
@@ -131,37 +400,46 @@ impl Render for Workspace {
             .on_action(
                 cx.listener(|this, _: &NewTask, window, cx| this.navigate(Page::Tasks, window, cx)),
             )
+            .on_action(
+                cx.listener(|this, _: &ShowFocus, window, cx| {
+                    this.navigate(Page::Focus, window, cx)
+                }),
+            )
             .on_action(cx.listener(|this, _: &ShowSettings, window, cx| {
                 this.navigate(Page::Settings, window, cx)
             }))
+            .on_action(cx.listener(|this, _: &ToggleTimer, _, cx| {
+                this.timer.update(cx, |timer, cx| timer.toggle(cx));
+            }))
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
+            .relative()
             .size_full()
+            .overflow_hidden()
             .bg(theme.background)
             .text_color(theme.foreground)
             .font_family(theme.font_family.clone())
+            .child(fx::aurora(ambient, cx))
             .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_h_0()
-                    .child(self.render_sidebar(cx))
+                v_flex()
+                    .absolute()
+                    .inset_0()
+                    .size_full()
+                    .child(self.render_title_bar(&theme))
                     .child(
-                        div()
-                            .id("content")
+                        h_flex()
+                            .items_stretch()
                             .flex_1()
-                            .min_w_0()
-                            .overflow_y_scroll()
+                            .min_h_0()
+                            .child(self.render_sidebar(&theme, cx))
                             .child(
                                 div()
-                                    .w_full()
-                                    .max_w(px(860.))
-                                    .mx_auto()
-                                    .px_8()
-                                    .py_8()
-                                    .child(self.active_view()),
+                                    .id("content")
+                                    .flex_1()
+                                    .min_w_0()
+                                    .overflow_y_scroll()
+                                    .child(fx::enter(page, ("page", page_id), 0)),
                             ),
                     ),
             )
-            .child(self.render_status_bar(cx))
     }
 }
