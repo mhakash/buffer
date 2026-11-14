@@ -11,17 +11,18 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    Animation, AnimationExt, AnyElement, App, Context, DragMoveEvent, Entity, Focusable,
-    FontWeight, Hsla, Render, SharedString, SpringAnimation, Subscription, Window, div,
+    Animation, AnimationExt, AnyElement, App, Context, DragMoveEvent, Entity, EventEmitter,
+    Focusable, FontWeight, Hsla, Render, SharedString, SpringAnimation, Subscription, Window, div,
     ease_in_out, prelude::*, px, rgb,
 };
 
+use super::OpenTask;
 use crate::{
     components::{category_tag, chip, fx, icon_button},
     prefs, quotes,
     tasks::{
-        Category, Id, Priority, Task, TaskStore, completions_by_day, last_days, parse_quick_add,
-        streak,
+        Category, Id, Priority, Task, TaskStore, classify, completions_by_day, last_days,
+        parse_quick_add, streak,
     },
 };
 
@@ -58,6 +59,8 @@ pub struct TasksPage {
     editing: Option<Id>,
     last_deleted: Option<Task>,
     drag_session: Option<DragSession>,
+    /// Task open in the detail panel (highlighted in the list).
+    selected: Option<Id>,
     /// Ticked tasks playing their exit animation before they move to Done.
     completing: Vec<Id>,
     toast: Option<(u64, SharedString)>,
@@ -154,6 +157,7 @@ impl TasksPage {
             editing: None,
             last_deleted: None,
             drag_session: None,
+            selected: None,
             completing: Vec::new(),
             toast: None,
             _toast_timer: None,
@@ -275,6 +279,11 @@ impl TasksPage {
             .into_any_element()
     }
 
+    pub fn set_selected(&mut self, id: Option<Id>, cx: &mut Context<Self>) {
+        self.selected = id;
+        cx.notify();
+    }
+
     /// Plays the exit animation, then marks the task done and celebrates.
     fn complete(&mut self, id: Id, cx: &mut Context<Self>) {
         if self.completing.contains(&id) {
@@ -348,8 +357,13 @@ impl TasksPage {
                 None => fallback_category,
             };
             match editing {
-                Some(id) => store.update_task(id, parsed.title, priority, category, cx),
-                None => store.add_task(parsed.title, priority, category, cx),
+                Some(id) => {
+                    store.update_task(id, parsed.title, priority, category, cx);
+                    for url in &parsed.links {
+                        store.add_link(id, url, cx);
+                    }
+                }
+                None => store.add_task(parsed.title, priority, category, parsed.links, cx),
             }
         });
         self.clear_composer(window, cx);
@@ -1150,6 +1164,10 @@ impl TasksPage {
             .when(self.editing == Some(id), |this| {
                 this.bg(theme.secondary_active)
             })
+            .when(
+                self.selected == Some(id) && self.editing != Some(id),
+                |this| this.bg(theme.secondary_active),
+            )
             .when(completing, |this| this.bg(theme.success.opacity(0.12)))
             .hover(move |s| s.bg(hover))
             .child(stripe)
@@ -1176,16 +1194,60 @@ impl TasksPage {
                 },
             ));
         }
+        let muted = theme.muted_foreground;
+        let badge = |icon: IconName, label: String| {
+            h_flex()
+                .flex_none()
+                .gap_1()
+                .text_xs()
+                .text_color(muted)
+                .child(Icon::new(icon).xsmall().text_color(muted))
+                .child(label)
+        };
+        let (sub_done, sub_total) = task.subtask_progress();
+        let badges = h_flex()
+            .flex_none()
+            .gap_3()
+            .when(sub_total > 0, |this| {
+                this.child(badge(
+                    IconName::ListChecks,
+                    format!("{sub_done}/{sub_total}"),
+                ))
+            })
+            .when(!task.links.is_empty(), |this| {
+                let label = match task.links.as_slice() {
+                    [only] => classify(&only.url).label,
+                    many => many.len().to_string(),
+                };
+                this.child(badge(IconName::Link, label))
+            })
+            .when(!task.notes.trim().is_empty(), |this| {
+                this.child(Icon::new(IconName::NotebookPen).xsmall().text_color(muted))
+            })
+            .when(!task.log.is_empty(), |this| {
+                this.child(badge(IconName::ScrollText, task.log.len().to_string()))
+            });
         let row = row
             .child(
-                div()
+                h_flex()
+                    .id(("open", id))
                     .flex_1()
                     .min_w_0()
-                    .text_sm()
-                    .when(done || completing, |this| {
-                        this.line_through().text_color(theme.muted_foreground)
-                    })
-                    .child(task.title.clone()),
+                    .gap_3()
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |_, _, _, cx| cx.emit(OpenTask(id))))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_sm()
+                            .when(done || completing, |this| {
+                                this.line_through().text_color(theme.muted_foreground)
+                            })
+                            .child(task.title.clone()),
+                    )
+                    .child(badges),
             )
             .when_some(category, |this, category| {
                 this.child(category_tag(category.name.clone(), hex(category.color)).flex_none())
@@ -1216,6 +1278,8 @@ impl TasksPage {
         }
     }
 }
+
+impl EventEmitter<OpenTask> for TasksPage {}
 
 impl Render for TasksPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

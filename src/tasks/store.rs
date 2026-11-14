@@ -1,7 +1,9 @@
 use chrono::Utc;
 use gpui_kit::{Context, SharedString};
 
-use super::model::{CATEGORY_COLORS, Category, Id, Priority, Task, TaskData, category_key};
+use super::model::{
+    CATEGORY_COLORS, Category, Id, Link, LogEntry, Priority, Subtask, Task, TaskData, category_key,
+};
 use crate::storage;
 
 const FILE: &str = "tasks.json";
@@ -45,10 +47,18 @@ impl TaskStore {
         title: String,
         priority: Priority,
         category: Option<Id>,
+        links: Vec<String>,
         cx: &mut Context<Self>,
     ) {
         let id = self.next_id();
         let sort_order = self.next_sort_order(priority);
+        let links = links
+            .into_iter()
+            .map(|url| Link {
+                id: self.next_id(),
+                url,
+            })
+            .collect();
         self.data.tasks.push(Task {
             id,
             title,
@@ -57,6 +67,10 @@ impl TaskStore {
             category,
             created_at: Utc::now(),
             completed_at: None,
+            notes: String::new(),
+            subtasks: Vec::new(),
+            links,
+            log: Vec::new(),
         });
         self.commit(cx);
     }
@@ -73,6 +87,109 @@ impl TaskStore {
             task.title = title;
             task.priority = priority;
             task.category = category;
+            self.commit(cx);
+        }
+    }
+
+    pub fn set_title(&mut self, id: Id, title: &str, cx: &mut Context<Self>) {
+        let title = title.trim();
+        if let Some(task) = self.task_mut(id)
+            && !title.is_empty()
+            && task.title != title
+        {
+            task.title = title.to_string();
+            self.commit(cx);
+        }
+    }
+
+    pub fn set_notes(&mut self, id: Id, notes: &str, cx: &mut Context<Self>) {
+        if let Some(task) = self.task_mut(id)
+            && task.notes != notes
+        {
+            task.notes = notes.to_string();
+            self.commit(cx);
+        }
+    }
+
+    pub fn add_subtask(&mut self, id: Id, title: &str, cx: &mut Context<Self>) {
+        let title = title.trim();
+        if title.is_empty() {
+            return;
+        }
+        let sub_id = self.next_id();
+        if let Some(task) = self.task_mut(id) {
+            task.subtasks.push(Subtask {
+                id: sub_id,
+                title: title.to_string(),
+                completed_at: None,
+            });
+            self.commit(cx);
+        }
+    }
+
+    pub fn toggle_subtask(&mut self, id: Id, sub_id: Id, cx: &mut Context<Self>) {
+        if let Some(sub) = self
+            .task_mut(id)
+            .and_then(|t| t.subtasks.iter_mut().find(|s| s.id == sub_id))
+        {
+            sub.completed_at = match sub.completed_at {
+                Some(_) => None,
+                None => Some(Utc::now()),
+            };
+            self.commit(cx);
+        }
+    }
+
+    pub fn delete_subtask(&mut self, id: Id, sub_id: Id, cx: &mut Context<Self>) {
+        if let Some(task) = self.task_mut(id) {
+            task.subtasks.retain(|s| s.id != sub_id);
+            self.commit(cx);
+        }
+    }
+
+    pub fn add_link(&mut self, id: Id, url: &str, cx: &mut Context<Self>) {
+        let url = url.trim();
+        if url.is_empty() {
+            return;
+        }
+        let link_id = self.next_id();
+        if let Some(task) = self.task_mut(id)
+            && !task.links.iter().any(|l| l.url == url)
+        {
+            task.links.push(Link {
+                id: link_id,
+                url: url.to_string(),
+            });
+            self.commit(cx);
+        }
+    }
+
+    pub fn delete_link(&mut self, id: Id, link_id: Id, cx: &mut Context<Self>) {
+        if let Some(task) = self.task_mut(id) {
+            task.links.retain(|l| l.id != link_id);
+            self.commit(cx);
+        }
+    }
+
+    pub fn add_log(&mut self, id: Id, text: &str, cx: &mut Context<Self>) {
+        let text = text.trim();
+        if text.is_empty() {
+            return;
+        }
+        let entry_id = self.next_id();
+        if let Some(task) = self.task_mut(id) {
+            task.log.push(LogEntry {
+                id: entry_id,
+                at: Utc::now(),
+                text: text.to_string(),
+            });
+            self.commit(cx);
+        }
+    }
+
+    pub fn delete_log(&mut self, id: Id, entry_id: Id, cx: &mut Context<Self>) {
+        if let Some(task) = self.task_mut(id) {
+            task.log.retain(|e| e.id != entry_id);
             self.commit(cx);
         }
     }

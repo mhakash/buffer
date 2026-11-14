@@ -17,7 +17,7 @@ use crate::{
         icon_button,
     },
     focus::FocusTimer,
-    pages::{FocusPage, Page, SettingsPage, TasksPage},
+    pages::{DetailEvent, FocusPage, OpenTask, Page, SettingsPage, TaskDetail, TasksPage},
     prefs, quotes,
     tasks::{TaskStore, completions_by_day, streak},
     theme::{self, Appearance},
@@ -34,6 +34,7 @@ pub struct Workspace {
     tasks: Entity<TasksPage>,
     focus: Entity<FocusPage>,
     settings: Entity<SettingsPage>,
+    detail: Entity<TaskDetail>,
     _clock: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
@@ -45,6 +46,8 @@ impl Workspace {
         let tasks = cx.new(|cx| TasksPage::new(store.clone(), window, cx));
         let focus = cx.new(|cx| FocusPage::new(timer.clone(), store.clone(), cx));
         let settings = cx.new(|cx| SettingsPage::new(store.clone(), window, cx));
+        let detail = cx.new(|cx| TaskDetail::new(store.clone(), window, cx));
+
         // Focusing during window construction is dropped; wait until the window exists.
         cx.defer_in(window, |this, window, cx| {
             this.navigate(Page::Tasks, window, cx)
@@ -67,6 +70,18 @@ impl Workspace {
             _subscriptions: vec![
                 cx.observe(&store, |_, _, cx| cx.notify()),
                 cx.observe(&timer, |_, _, cx| cx.notify()),
+                cx.subscribe_in(&tasks, window, |this, _, e: &OpenTask, window, cx| {
+                    this.open_task(e.0, window, cx)
+                }),
+                cx.subscribe_in(&focus, window, |this, _, e: &OpenTask, window, cx| {
+                    this.open_task(e.0, window, cx)
+                }),
+                cx.subscribe(&detail, |this, _, event: &DetailEvent, cx| match event {
+                    DetailEvent::Close => {
+                        this.tasks.update(cx, |t, cx| t.set_selected(None, cx));
+                        cx.notify();
+                    }
+                }),
             ],
             _clock: clock,
             store,
@@ -74,7 +89,17 @@ impl Workspace {
             tasks,
             focus,
             settings,
+            detail,
         }
+    }
+
+    fn open_task(&mut self, id: crate::tasks::Id, window: &mut Window, cx: &mut Context<Self>) {
+        if self.active == Page::Settings {
+            self.navigate(Page::Tasks, window, cx);
+        }
+        self.detail.update(cx, |d, cx| d.open(id, window, cx));
+        self.tasks.update(cx, |t, cx| t.set_selected(Some(id), cx));
+        cx.notify();
     }
 
     fn navigate(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
@@ -384,6 +409,12 @@ impl Render for Workspace {
         let theme = cx.theme().clone();
         let ambient = prefs::get(cx).ambient;
         let page_id = self.active as u64;
+        // Hide the panel on Settings, and drop it if its task was deleted.
+        let open = self.detail.read(cx).task_id();
+        if open.is_some_and(|id| self.store.read(cx).task(id).is_none()) {
+            self.detail.update(cx, |d, cx| d.close(cx));
+        }
+        let show_detail = self.active != Page::Settings && self.detail.read(cx).task_id().is_some();
 
         let page = div()
             .w_full()
@@ -443,7 +474,12 @@ impl Render for Workspace {
                                     .min_w_0()
                                     .overflow_y_scroll()
                                     .child(fx::enter(page, ("page", page_id), 0)),
-                            ),
+                            )
+                            .when(show_detail, |this| {
+                                this.child(
+                                    div().flex_none().mr_3().mb_3().child(self.detail.clone()),
+                                )
+                            }),
                     ),
             )
     }

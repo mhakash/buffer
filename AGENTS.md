@@ -32,9 +32,9 @@ storage.rs     load/save JSON in data_dir()
 prefs.rs       settings.json (appearance, name, ambient) as a Global; prefs::update saves + repaints
 theme.rs       Appearance → kit Theme; loads themes/workdesk.json (watched in debug)
 workspace.rs   root view: aurora | TitleBar | custom sidebar | active page; owns TaskStore + FocusTimer
-tasks/         model.rs (Task, …, parse_quick_add, streak stats) · store.rs (TaskStore entity)
+tasks/         model.rs (Task + Subtask/Link/LogEntry, parse_quick_add, streak stats) · links.rs (URL → Jira/MR/… label) · store.rs (TaskStore entity)
 focus/         FocusTimer entity (pomodoro, focus.json)
-pages/         one Render view per sidebar page; Page enum lists them
+pages/         one Render view per sidebar page; Page enum lists them. task_detail.rs = right panel owned by Workspace; pages `cx.emit(OpenTask(id))`, Workspace subscribes and opens it
 components/    thin fn wrappers over kit components + icon Assets; fx.rs = glow/gradient/ring/animations
 ```
 

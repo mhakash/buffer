@@ -2,10 +2,11 @@
 
 use gpui_kit::component::{ActiveTheme, Icon, Sizable, Theme, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, Context, Entity, FontWeight, Hsla, Subscription, Window, assets::IconName, div,
-    prelude::*, px, rgb,
+    AnyElement, Context, Entity, EventEmitter, FontWeight, Hsla, Subscription, Window,
+    assets::IconName, div, prelude::*, px, rgb,
 };
 
+use super::OpenTask;
 use crate::{
     components::{chip, fx, icon_button},
     focus::{FocusTimer, LENGTHS, Phase},
@@ -203,7 +204,11 @@ impl FocusPage {
         }))
     }
 
-    fn render_next(&self, theme: &Theme, cx: &mut Context<Self>) -> gpui_kit::Div {
+    fn render_next(
+        &self,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::Stateful<gpui_kit::Div> {
         let next: Option<Task> = {
             let mut open: Vec<&Task> = self
                 .store
@@ -215,8 +220,15 @@ impl FocusPage {
             open.sort_by_key(|t| (t.priority, t.sort_order, t.created_at));
             open.first().map(|t| (*t).clone())
         };
+        let next_id = next.as_ref().map(|t| t.id);
 
         h_flex()
+            .id("focus-next")
+            .when_some(next_id, |this, id| {
+                this.cursor_pointer()
+                    .hover(|s| s.bg(theme.secondary_active))
+                    .on_click(cx.listener(move |_, _, _, cx| cx.emit(OpenTask(id))))
+            })
             .w_full()
             .gap_3()
             .p_4()
@@ -346,6 +358,8 @@ pub fn stat_tile(
                 ),
         )
 }
+
+impl EventEmitter<OpenTask> for FocusPage {}
 
 impl Render for FocusPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {

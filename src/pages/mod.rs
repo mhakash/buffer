@@ -1,11 +1,13 @@
 mod focus;
 mod settings;
+mod task_detail;
 mod tasks;
 
 use gpui_kit::assets::IconName;
 
 pub use focus::FocusPage;
 pub use settings::SettingsPage;
+pub use task_detail::{DetailEvent, OpenTask, TaskDetail};
 pub use tasks::TasksPage;
 
 /// Every top-level page shown in the sidebar. Add a variant here to add a page.

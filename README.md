@@ -40,7 +40,7 @@ Bump `version` in `Cargo.toml` with each feature; it shows in the status bar and
 
 | File | Contents |
 |---|---|
-| `tasks.json` | Tasks + categories. Saved on every change, atomically. |
+| `tasks.json` | Tasks (incl. notes, subtasks, links, work log) + categories. Saved on every change, atomically. |
 | `settings.json` | Theme, your name (greeting), ambient motion on/off. |
 | `focus.json` | Focus length + log of finished focus sessions. |
 
@@ -55,6 +55,7 @@ Type in the composer and press Enter. Inline tokens (anywhere in the text):
 |---|---|
 | `#name` | Category; matched loosely (`#follow-up` = "Follow-up"), created if new |
 | `!urgent` `!high` `!medium` `!low` (or `!1`–`!4`) | Priority |
+| `https://…` | Attached as a link (Jira/GitLab/GitHub recognised); a link alone becomes the title, e.g. `PAY-88` |
 | `\#` `\!` `\\` | Literal `#`, `!`, or `\` in the title (prefix the word, e.g. `\#channel`) |
 
 Without tokens, the priority/category chips under the input apply. Hover a task for actions:
@@ -62,6 +63,21 @@ drag the handle to reorder within a priority group (preview while dragging; save
 Tick the checkbox to complete (row slides out, a toast cheers you on); Done groups by day.
 The hero card above shows today's progress ring, your streak (consecutive days with a completion)
 and the last 7 days.
+
+## Task details
+
+Click a task's title to open its panel on the right (Esc or × closes):
+
+| Section | What it holds |
+|---|---|
+| Header | Done checkbox, priority (click to cycle), category, created/done time; title is editable inline |
+| Subtasks | Checklist with progress bar; Enter adds |
+| Links | Paste URLs, Enter adds. Jira → `PAY-88`, GitLab MR → `!412`, issues → `#7`, GitHub PRs, Confluence pages; click opens in browser |
+| Notes | Free multi-line text, saved as you type |
+| Work log | Timestamped entries (newest first) for what you did |
+
+List rows show badges for subtasks (`2/5`), links (label or count), notes and log entries.
+Focus → "Up next" opens the same panel.
 
 ## Focus
 
@@ -99,7 +115,7 @@ pulsing indicators (saves battery). macOS "Reduce motion" is honoured by every a
 | `src/quotes.rs` | Daily sidebar line + time-of-day greeting |
 | `themes/workdesk.json` | Light + dark palettes (hot-reloaded in debug builds) |
 | `src/workspace.rs` | Root view: aurora backdrop, title bar clock, sidebar, page transitions |
-| `src/tasks/` | Task model, quick-add parser, `TaskStore` entity |
+| `src/tasks/` | Task model, quick-add parser, link classifier (`links.rs`), `TaskStore` entity |
 | `src/pages/` | One file per page; `Page` enum drives the sidebar |
 | `src/components/` | Thin wrappers over gpui-kit (`chip`, `icon_button`, `category_tag`, `card`), icon `Assets`, `fx` (glow, gradients, ring, enter/pulse animations) |
 | `bacon.toml` | `make dev` rebuild/relaunch job |

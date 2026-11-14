@@ -89,9 +89,50 @@ pub struct Task {
     pub created_at: DateTime<Utc>,
     #[serde(default)]
     pub completed_at: Option<DateTime<Utc>>,
+    /// Free-form working notes.
+    #[serde(default)]
+    pub notes: String,
+    #[serde(default)]
+    pub subtasks: Vec<Subtask>,
+    #[serde(default)]
+    pub links: Vec<Link>,
+    /// Timestamped progress entries, oldest first.
+    #[serde(default)]
+    pub log: Vec<LogEntry>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Subtask {
+    pub id: Id,
+    pub title: String,
+    #[serde(default)]
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Link {
+    pub id: Id,
+    pub url: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LogEntry {
+    pub id: Id,
+    pub at: DateTime<Utc>,
+    pub text: String,
 }
 
 impl Task {
+    /// (done, total) subtasks.
+    pub fn subtask_progress(&self) -> (usize, usize) {
+        let done = self
+            .subtasks
+            .iter()
+            .filter(|s| s.completed_at.is_some())
+            .count();
+        (done, self.subtasks.len())
+    }
+
     pub fn is_done(&self) -> bool {
         self.completed_at.is_some()
     }
@@ -169,11 +210,14 @@ impl Default for TaskData {
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct QuickAdd {
     pub title: String,
+    /// `http(s)://…` words, removed from the title.
+    pub links: Vec<String>,
     pub priority: Option<Priority>,
     pub category: Option<String>,
 }
 
-/// Parses `Fix login bug #work !high` into title, category and priority.
+/// Parses `Fix login bug #work !high https://…` into title, category, priority and links.
+/// With only a link, the title falls back to the link's label (e.g. `PROJ-123`).
 /// Unrecognised `!tokens` stay in the title. Prefix `#` or `!` with `\` for literals (`\#tag`, `\!wow`).
 pub fn parse_quick_add(input: &str) -> QuickAdd {
     let mut parsed = QuickAdd::default();
@@ -183,7 +227,9 @@ pub fn parse_quick_add(input: &str) -> QuickAdd {
             words.push(unescape_quick_add_word(word));
             continue;
         }
-        if let Some(name) = word.strip_prefix('#').filter(|name| !name.is_empty()) {
+        if is_url(word) {
+            parsed.links.push(word.to_string());
+        } else if let Some(name) = word.strip_prefix('#').filter(|name| !name.is_empty()) {
             parsed.category = Some(name.to_string());
         } else if let Some(priority) = word.strip_prefix('!').and_then(Priority::parse) {
             parsed.priority = Some(priority);
@@ -192,7 +238,16 @@ pub fn parse_quick_add(input: &str) -> QuickAdd {
         }
     }
     parsed.title = words.join(" ");
+    if parsed.title.is_empty()
+        && let Some(url) = parsed.links.first()
+    {
+        parsed.title = super::links::classify(url).label;
+    }
     parsed
+}
+
+pub fn is_url(word: &str) -> bool {
+    word.starts_with("https://") || word.starts_with("http://")
 }
 
 fn unescape_quick_add_word(word: &str) -> String {
@@ -235,6 +290,23 @@ mod tests {
         assert_eq!(parsed.title, "Fix login bug");
         assert_eq!(parsed.priority, Some(Priority::Urgent));
         assert_eq!(parsed.category.as_deref(), Some("work"));
+    }
+
+    #[test]
+    fn captures_links_and_falls_back_to_link_label() {
+        let parsed =
+            parse_quick_add("Review https://gitlab.com/g/app/-/merge_requests/412 #review");
+        assert_eq!(parsed.title, "Review");
+        assert_eq!(parsed.links.len(), 1);
+        let parsed = parse_quick_add("https://acme.atlassian.net/browse/PAY-88");
+        assert_eq!(parsed.title, "PAY-88");
+    }
+
+    #[test]
+    fn old_tasks_without_details_load() {
+        let json = r#"{"id":1,"title":"x","priority":"high","created_at":"2026-01-01T00:00:00Z"}"#;
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert!(task.notes.is_empty() && task.subtasks.is_empty() && task.links.is_empty());
     }
 
     #[test]
