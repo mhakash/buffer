@@ -59,7 +59,7 @@ impl Workspace {
         let timer = cx.new(FocusTimer::load);
         let tasks = cx.new(|cx| TasksPage::new(store.clone(), window, cx));
         let focus = cx.new(|cx| FocusPage::new(timer.clone(), store.clone(), cx));
-        let notes = cx.new(|cx| NotesPage::new(window, cx));
+        let notes = cx.new(|cx| NotesPage::new(store.clone(), window, cx));
         let settings = cx.new(|cx| SettingsPage::new(store.clone(), window, cx));
         let detail = cx.new(|cx| TaskDetail::new(store.clone(), window, cx));
 

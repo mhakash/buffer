@@ -37,7 +37,8 @@ pages/task_detail.rs  side panel / full page (`full_page`); Workspace sizes it (
 focus/         FocusTimer entity (pomodoro, focus.json)
 notes/         NoteStore entity (notes.json index + notes/<id>.md; first line = title via split/compose); pages/notes.rs = list + document panes, fills the content area itself (Workspace skips the max-width wrapper)
 pages/         one Render view per sidebar page; Page enum lists them. task_detail.rs = right panel owned by Workspace; pages `cx.emit(OpenTask(id))`, Workspace subscribes and opens it
-components/    thin fn wrappers over kit components + icon Assets; fx.rs = glow/gradient/ring/animations
+components/    thin fn wrappers over kit components + icon Assets; fx.rs = glow/gradient/ring/animations; markdown.rs = `markdown_view` (always use it for Markdown: Mermaid + frontmatter plugins, image resolver)
+net.rs        HttpClient for GPUI (ureq on a thread); without it remote images never load
 ```
 
 - **State**: one `Entity<TaskStore>` created in `Workspace::new`, cloned into pages. Pages `cx.observe(&store, …)` to re-render. All mutations go through `TaskStore` methods, which end in `commit()` (save + `cx.notify()`). Never mutate task data elsewhere.

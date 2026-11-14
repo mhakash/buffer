@@ -14,7 +14,6 @@ use gpui_kit::component::{
     h_flex,
     input::{Escape, Input, InputEvent, InputState, Textarea, TextareaState},
     menu::{DropdownMenu, PopupMenuItem},
-    text::TextView,
     v_flex,
 };
 use gpui_kit::{
@@ -24,7 +23,10 @@ use gpui_kit::{
 
 use super::tasks::due_label;
 use crate::{
-    components::{category_tag, confirm::confirm_delete, fx, icon_button, markdown_style},
+    components::{
+        category_tag, confirm::confirm_delete, fx, icon_button, markdown_style, markdown_view,
+        property_row,
+    },
     tasks::{Id, LinkKind, Task, TaskStore, classify, is_url},
 };
 
@@ -339,19 +341,6 @@ impl TaskDetail {
             )
     }
 
-    fn property(icon: IconName, label: &'static str, theme: &Theme) -> gpui_kit::Div {
-        h_flex().min_h(px(32.)).gap_2().child(
-            h_flex()
-                .flex_none()
-                .w(px(112.))
-                .gap_2()
-                .text_sm()
-                .text_color(theme.muted_foreground)
-                .child(Icon::new(icon).small().text_color(theme.muted_foreground))
-                .child(label),
-        )
-    }
-
     fn render_properties(
         &self,
         task: &Task,
@@ -439,10 +428,10 @@ impl TaskDetail {
         v_flex()
             .px(px(self.gutter()))
             .py_2()
-            .child(Self::property(IconName::CircleDot, "Status", theme).child(status))
-            .child(Self::property(IconName::Flag, "Priority", theme).child(priority_pill))
+            .child(property_row(IconName::CircleDot, "Status", theme).child(status))
+            .child(property_row(IconName::Flag, "Priority", theme).child(priority_pill))
             .child(
-                Self::property(IconName::Tags, "Categories", theme).child(
+                property_row(IconName::Tags, "Categories", theme).child(
                     h_flex()
                         .flex_wrap()
                         .gap_1()
@@ -455,7 +444,7 @@ impl TaskDetail {
                 ),
             )
             .child(
-                Self::property(IconName::Calendar, "Due", theme)
+                property_row(IconName::Calendar, "Due", theme)
                     .child(
                         div().w(px(190.)).child(
                             DatePicker::new(&self.due)
@@ -481,7 +470,7 @@ impl TaskDetail {
                     }),
             )
             .child(
-                Self::property(IconName::Clock, "Created", theme)
+                property_row(IconName::Clock, "Created", theme)
                     .child(div().text_sm().child(when(task.created_at))),
             )
     }
@@ -547,14 +536,17 @@ impl TaskDetail {
                 .id("notes-preview")
                 .text_sm()
                 .child(
-                    TextView::markdown(("notes-md", id), task.notes.clone())
-                        .style(markdown_style())
-                        .selectable(true)
-                        .on_task_toggle(move |event, _, cx| {
-                            store.update(cx, |s, cx| {
-                                s.set_note_checkbox(id, event.marker_range(), event.checked(), cx)
-                            });
-                        }),
+                    markdown_view(
+                        ("notes-md", id),
+                        task.notes.clone(),
+                        markdown_style(),
+                        TaskStore::task_dir(id),
+                    )
+                    .on_task_toggle(move |event, _, cx| {
+                        store.update(cx, |s, cx| {
+                            s.set_note_checkbox(id, event.marker_range(), event.checked(), cx)
+                        });
+                    }),
                 )
                 .into_any_element()
         };

@@ -1,6 +1,7 @@
 mod actions;
 mod components;
 mod focus;
+mod net;
 mod notes;
 mod pages;
 mod prefs;
@@ -28,6 +29,7 @@ fn main() {
 
     app.run(|cx: &mut App| {
         gpui_kit::init(cx);
+        cx.set_http_client(net::Client::new());
         prefs::init(cx);
         theme::init(cx);
         actions::init(cx);

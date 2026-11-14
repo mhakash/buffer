@@ -5,7 +5,10 @@ use chrono::{DateTime, Utc};
 use gpui_kit::{Context, SharedString};
 use serde::{Deserialize, Serialize};
 
-use crate::{storage, tasks::set_checkbox};
+use crate::{
+    storage,
+    tasks::{self, set_checkbox},
+};
 
 pub type NoteId = u64;
 
@@ -21,6 +24,19 @@ pub struct Note {
     /// line is the title; see [`split`].
     #[serde(skip)]
     pub text: String,
+    /// Shared task categories, shown as tags.
+    #[serde(default)]
+    pub tags: Vec<tasks::Id>,
+    /// Free-form properties (Notion-style), in display order.
+    #[serde(default)]
+    pub props: Vec<Property>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Property {
+    pub name: String,
+    #[serde(default)]
+    pub value: String,
 }
 
 impl Note {
@@ -42,18 +58,29 @@ impl Note {
         }
     }
 
-    /// First line of the content, for the list preview.
+    /// First prose line of the content (code blocks skipped), for the list preview.
     pub fn snippet(&self) -> String {
+        let mut in_code = false;
         self.split()
             .content
             .lines()
+            .filter(|l| {
+                let fence = l.trim_start().starts_with("```");
+                in_code ^= fence;
+                !fence && !in_code && !l.trim_start().starts_with("![")
+            })
             .map(plain)
             .find(|l| !l.is_empty())
             .unwrap_or_default()
     }
 
+    /// Text or a property value contains `query` (case-insensitive).
     pub fn matches(&self, query: &str) -> bool {
-        query.is_empty() || self.text.to_lowercase().contains(&query.to_lowercase())
+        let query = query.to_lowercase();
+        query.is_empty()
+            || std::iter::once(&self.text)
+                .chain(self.props.iter().map(|p| &p.value))
+                .any(|s| s.to_lowercase().contains(&query))
     }
 }
 
@@ -159,6 +186,11 @@ impl NoteStore {
         }
     }
 
+    /// Folder holding the note files; relative image paths in notes resolve against it.
+    pub fn dir() -> std::path::PathBuf {
+        storage::path("notes")
+    }
+
     /// Most recently edited first.
     pub fn notes(&self) -> Vec<Note> {
         let mut notes = self.data.notes.clone();
@@ -180,6 +212,8 @@ impl NoteStore {
             created_at: now,
             updated_at: now,
             text: String::new(),
+            tags: Vec::new(),
+            props: Vec::new(),
         });
         self.commit(cx);
         id
@@ -224,6 +258,56 @@ impl NoteStore {
             .and_then(|n| set_checkbox(&n.text, marker, checked))
         {
             self.edit(id, |_| text, cx);
+        }
+    }
+
+    pub fn toggle_tag(&mut self, id: NoteId, tag: tasks::Id, cx: &mut Context<Self>) {
+        self.edit_meta(id, cx, |n| {
+            if let Some(ix) = n.tags.iter().position(|t| *t == tag) {
+                n.tags.remove(ix);
+            } else {
+                n.tags.push(tag);
+            }
+        });
+    }
+
+    pub fn add_prop(&mut self, id: NoteId, name: &str, cx: &mut Context<Self>) {
+        let name = name.trim().to_string();
+        if !name.is_empty() {
+            self.edit_meta(id, cx, |n| {
+                n.props.push(Property {
+                    name,
+                    value: String::new(),
+                })
+            });
+        }
+    }
+
+    pub fn set_prop_value(&mut self, id: NoteId, ix: usize, value: &str, cx: &mut Context<Self>) {
+        self.edit_meta(id, cx, |n| {
+            if let Some(p) = n.props.get_mut(ix) {
+                p.value = value.to_string();
+            }
+        });
+    }
+
+    pub fn remove_prop(&mut self, id: NoteId, ix: usize, cx: &mut Context<Self>) {
+        self.edit_meta(id, cx, |n| {
+            if ix < n.props.len() {
+                n.props.remove(ix);
+            }
+        });
+    }
+
+    /// Index-only change (tags, properties): saves `notes.json`.
+    fn edit_meta(&mut self, id: NoteId, cx: &mut Context<Self>, f: impl FnOnce(&mut Note)) {
+        if let Some(note) = self.note_mut(id) {
+            let before = (note.tags.clone(), note.props.clone());
+            f(note);
+            if (&note.tags, &note.props) != (&before.0, &before.1) {
+                note.updated_at = Utc::now();
+                self.commit(cx);
+            }
         }
     }
 
@@ -280,6 +364,8 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             text: text.into(),
+            tags: Vec::new(),
+            props: Vec::new(),
         }
     }
 
@@ -290,6 +376,10 @@ mod tests {
         assert_eq!(n.snippet(), "ping SRE");
         assert_eq!(note("").title(), "Untitled");
         assert_eq!(note("> - quoted").title(), "quoted");
+        assert_eq!(
+            note("# T\n```mermaid\nflowchart LR\n```\nafter").snippet(),
+            "after"
+        );
     }
 
     #[test]
@@ -317,5 +407,11 @@ mod tests {
     fn search_is_case_insensitive() {
         assert!(note("Novartis intake").matches("novartis"));
         assert!(!note("Novartis intake").matches("pfizer"));
+        let mut n = note("x");
+        n.props.push(Property {
+            name: "Owner".into(),
+            value: "Girish".into(),
+        });
+        assert!(n.matches("girish"));
     }
 }

@@ -44,7 +44,7 @@ Bump `version` in `Cargo.toml` with each feature; it shows in the status bar and
 | `tasks.json` | Index: task titles, priority, order, categories, dates + the category list |
 | `tasks/<id>/task.json` | That task's subtasks, links, work log |
 | `tasks/<id>/notes.md` | That task's notes (plain Markdown; edit it in any editor while the app is closed) |
-| `notes.json` | Notes index: ids, created/edited times |
+| `notes.json` | Notes index: ids, created/edited times, tags, properties |
 | `notes/<id>.md` | One standalone note (plain Markdown) |
 | `settings.json` | Theme, your name (greeting), ambient motion on/off. |
 | `focus.json` | Focus length + log of finished focus sessions. |
@@ -104,11 +104,27 @@ The sidebar shows the countdown while a session is active. "Up next" = your top 
 
 Standalone Markdown notes for anything that isn't a task (⌘3; ⌘⇧N creates one from anywhere),
 laid out like Notion across the whole content area: a list pane (newest edit first, search filters
-by content) and the open note as a document. The title is always editable (Enter jumps to the
-body); the body is rendered Markdown — Edit, or click the space below it, to write; Esc goes back
-to the rendered view, then out of full view. The panel button hides the list (full view). In the
-file the title is the first line (`# Title`). A note left empty is discarded when you leave it;
-the trash button deletes (with confirmation).
+by content and property values) and the open note as a document. The title is always editable
+(Enter jumps to the body); the body is rendered Markdown — Edit, or click the space below it, to
+write; Esc closes a property field, then the editor, then full view. The panel button hides the
+list (full view). In the file the title is the first line (`# Title`). A note left empty (no
+text, tags or properties) is discarded when you leave it; the trash button deletes (with
+confirmation).
+
+Properties under the title: Created, Edited, Tags (the task categories; + toggles), and any
+number of your own text properties ("Add a property" → name, Enter → value). Click a value to
+edit it; URL values get an open button; hover a row to remove it.
+
+## Markdown extras
+
+Task notes and notes render the same Markdown, plus:
+
+| Syntax | Renders as |
+|---|---|
+| ```` ```mermaid ```` fence | Diagram (flowchart, sequence, class, state, ER, gantt, pie, …), rendered natively; invalid syntax shows the error and source |
+| Leading `---` YAML block | Property rows (lists as pills) |
+| `![](https://…)` | Remote image (fetched by the app) |
+| `![](file.png)`, `~/…`, `/abs/…`, `file://…` | Local image; relative paths resolve against the note's folder (`notes/` or `tasks/<id>/`) |
 
 ## Look
 
@@ -138,12 +154,13 @@ pulsing indicators (saves battery). macOS "Reduce motion" is honoured by every a
 | `src/theme.rs` | Light/dark appearance over gpui-kit's `Theme`; loads `themes/` |
 | `src/focus/` | `FocusTimer` entity (pomodoro state, `focus.json`) |
 | `src/notes/` | `NoteStore` entity (`notes.json` + `notes/<id>.md`) |
+| `src/net.rs` | HTTP client GPUI uses for remote images |
 | `src/quotes.rs` | Daily sidebar line + time-of-day greeting |
 | `themes/workdesk.json` | Light + dark palettes (hot-reloaded in debug builds) |
 | `src/workspace.rs` | Root view: aurora backdrop, title bar clock, sidebar, page transitions |
 | `src/tasks/` | Task model, quick-add parser, link classifier (`links.rs`), `TaskStore` entity (index + per-task folders, v1 migration) |
 | `src/pages/` | One file per page; `Page` enum drives the sidebar |
-| `src/components/` | Thin wrappers over gpui-kit (`chip`, `icon_button`, `category_tag`, `card`), icon `Assets`, `markdown_style`/`document_style`, `fx` (glow, gradients, ring, enter/pulse animations) |
+| `src/components/` | Thin wrappers over gpui-kit (`chip`, `icon_button`, `category_tag`, `card`), icon `Assets`, `markdown_view` (Mermaid, frontmatter, image paths), `property_row`, `fx` (glow, gradients, ring, enter/pulse animations) |
 | `bacon.toml` | `make dev` rebuild/relaunch job |
 | `scripts/` | Icon generation, `.app` bundling, install; `ui/` = window/mouse/recording helpers for checking the UI |
 

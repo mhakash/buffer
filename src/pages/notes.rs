@@ -7,18 +7,22 @@ use gpui_kit::component::{
     button::{Button, ButtonRounded, ButtonVariants},
     h_flex,
     input::{Escape, Input, InputEvent, InputState, Textarea, TextareaState},
-    text::TextView,
+    menu::{DropdownMenu, PopupMenuItem},
     v_flex,
 };
 use gpui_kit::{
     AnyElement, Context, Entity, FocusHandle, FontWeight, SharedString, Subscription, Window,
-    assets::IconName, div, prelude::*, px,
+    assets::IconName, div, prelude::*, px, rgb,
 };
 
 use super::task_detail::when;
 use crate::{
-    components::{confirm::confirm_delete, document_style, icon_button},
+    components::{
+        category_tag, confirm::confirm_delete, document_style, icon_button, markdown_view,
+        property_row,
+    },
     notes::{Note, NoteId, NoteStore},
+    tasks::{TaskStore, is_url},
 };
 
 const LIST_W: f32 = 272.;
@@ -28,6 +32,8 @@ const DOC_FULL_W: f32 = 860.;
 
 pub struct NotesPage {
     store: Entity<NoteStore>,
+    /// Source of the tag list (shared task categories).
+    tasks: Entity<TaskStore>,
     selected: Option<NoteId>,
     /// Body shows the Markdown source instead of the rendered note.
     editing: bool,
@@ -36,13 +42,21 @@ pub struct NotesPage {
     title: Entity<InputState>,
     editor: Entity<TextareaState>,
     search: Entity<InputState>,
+    /// Property whose value is being edited in `prop_input`.
+    editing_prop: Option<usize>,
+    prop_input: Entity<InputState>,
+    /// "Add a property" name field is open.
+    adding_prop: bool,
+    new_prop: Entity<InputState>,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
 
 impl NotesPage {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(tasks: Entity<TaskStore>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let store = cx.new(NoteStore::load);
+        let prop_input = cx.new(|cx| InputState::new(window, cx).placeholder("Empty"));
+        let new_prop = cx.new(|cx| InputState::new(window, cx).placeholder("Property name"));
         let title = cx.new(|cx| InputState::new(window, cx).placeholder("Untitled"));
         let editor = cx.new(|cx| {
             TextareaState::new(window, cx)
@@ -57,6 +71,55 @@ impl NotesPage {
                 cx.notify();
             }),
             cx.observe(&search, |_, _, cx| cx.notify()),
+            cx.observe(&tasks, |_, _, cx| cx.notify()),
+            cx.subscribe_in(
+                &prop_input,
+                window,
+                |this, input, event: &InputEvent, _, cx| {
+                    let (Some(id), Some(ix)) = (this.selected, this.editing_prop) else {
+                        return;
+                    };
+                    match event {
+                        InputEvent::Change => {
+                            let value = input.read(cx).value();
+                            this.store
+                                .update(cx, |s, cx| s.set_prop_value(id, ix, &value, cx));
+                        }
+                        InputEvent::PressEnter { .. } | InputEvent::Blur => {
+                            this.editing_prop = None;
+                            cx.notify();
+                        }
+                        _ => {}
+                    }
+                },
+            ),
+            cx.subscribe_in(
+                &new_prop,
+                window,
+                |this, input, event: &InputEvent, window, cx| match event {
+                    InputEvent::PressEnter { .. } => {
+                        let name = input.read(cx).value().to_string();
+                        let Some(id) = this.selected else { return };
+                        this.adding_prop = false;
+                        if name.trim().is_empty() {
+                            cx.notify();
+                            return;
+                        }
+                        this.store.update(cx, |s, cx| s.add_prop(id, &name, cx));
+                        let ix = this
+                            .store
+                            .read(cx)
+                            .note(id)
+                            .map_or(0, |n| n.props.len().saturating_sub(1));
+                        this.edit_prop(ix, window, cx);
+                    }
+                    InputEvent::Blur => {
+                        this.adding_prop = false;
+                        cx.notify();
+                    }
+                    _ => {}
+                },
+            ),
             cx.subscribe_in(
                 &title,
                 window,
@@ -81,6 +144,11 @@ impl NotesPage {
         ];
         let mut this = Self {
             store,
+            tasks,
+            editing_prop: None,
+            prop_input,
+            adding_prop: false,
+            new_prop,
             selected: None,
             editing: false,
             full: false,
@@ -122,6 +190,8 @@ impl NotesPage {
     fn show(&mut self, id: NoteId, window: &mut Window, cx: &mut Context<Self>) {
         self.selected = Some(id);
         self.editing = false;
+        self.editing_prop = None;
+        self.adding_prop = false;
         let title = self
             .store
             .read(cx)
@@ -171,8 +241,39 @@ impl NotesPage {
     }
 
     /// Esc: leave the editor, then full view.
+    fn edit_prop(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(value) = self
+            .selected
+            .and_then(|id| self.store.read(cx).note(id)?.props.get(ix).cloned())
+            .map(|p| p.value)
+        else {
+            return;
+        };
+        self.editing_prop = Some(ix);
+        self.prop_input.update(cx, |i, cx| {
+            i.set_value(value, window, cx);
+            i.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    fn add_prop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.adding_prop = true;
+        self.new_prop.update(cx, |i, cx| {
+            i.set_value("", window, cx);
+            i.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    /// Esc: close a property field, leave the editor, then full view.
     fn escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.editing {
+        if self.editing_prop.is_some() || self.adding_prop {
+            self.editing_prop = None;
+            self.adding_prop = false;
+            self.focus_handle.focus(window, cx);
+            cx.notify();
+        } else if self.editing {
             self.preview(window, cx);
         } else if self.full {
             self.full = false;
@@ -183,11 +284,9 @@ impl NotesPage {
     /// A note left blank isn't worth keeping: leaving it removes it.
     fn drop_if_empty(&mut self, cx: &mut Context<Self>) {
         if let Some(id) = self.selected
-            && self
-                .store
-                .read(cx)
-                .note(id)
-                .is_some_and(|n| n.text.trim().is_empty())
+            && self.store.read(cx).note(id).is_some_and(|n| {
+                n.text.trim().is_empty() && n.tags.is_empty() && n.props.is_empty()
+            })
         {
             self.selected = None;
             self.editing = false;
@@ -354,13 +453,6 @@ impl NotesPage {
                 let id = note.id;
                 let title = note.title();
                 this.child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .mr_1()
-                        .child(format!("Edited {}", when(note.updated_at))),
-                )
-                .child(
                     Button::new("note-mode")
                         .ghost()
                         .small()
@@ -403,6 +495,192 @@ impl NotesPage {
             })
     }
 
+    /// Notion-style properties under the title: dates, tags (shared task categories) and
+    /// free-form text properties. Click a value to edit; hover a row to remove it.
+    fn render_properties(
+        &self,
+        note: &Note,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let id = note.id;
+        let categories = self.tasks.read(cx).categories().to_vec();
+        let tags: Vec<_> = categories
+            .iter()
+            .filter(|c| note.tags.contains(&c.id))
+            .cloned()
+            .collect();
+
+        let store = self.store.clone();
+        let tasks = self.tasks.clone();
+        let picker = Button::new("note-tags")
+            .ghost()
+            .xsmall()
+            .rounded(ButtonRounded::Size(px(999.)))
+            .icon(Icon::new(IconName::Plus).text_color(theme.muted_foreground))
+            .when(tags.is_empty(), |b| b.label("Add"))
+            .tooltip("Tags")
+            .dropdown_menu(move |mut menu, _, cx| {
+                let current = store
+                    .read(cx)
+                    .note(id)
+                    .map(|n| n.tags.clone())
+                    .unwrap_or_default();
+                let all = tasks.read(cx).categories().to_vec();
+                if all.is_empty() {
+                    return menu.label("No categories yet — add some in Settings");
+                }
+                for category in all {
+                    let cid = category.id;
+                    let store = store.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(category.name)
+                            .checked(current.contains(&cid))
+                            .on_click(move |_, _, cx| {
+                                store.update(cx, |s, cx| s.toggle_tag(id, cid, cx));
+                            }),
+                    );
+                }
+                menu.min_w(px(180.))
+            });
+
+        let props =
+            note.props.iter().enumerate().map(|(ix, prop)| {
+                let group = SharedString::from(format!("note-prop-{ix}"));
+                let value = if self.editing_prop == Some(ix) {
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_sm()
+                        .child(Input::new(&self.prop_input).appearance(false).px_0())
+                        .into_any_element()
+                } else {
+                    let url = is_url(prop.value.trim()).then(|| prop.value.trim().to_string());
+                    h_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_1()
+                        .child(
+                            div()
+                                .id(("note-prop-value", ix))
+                                .flex_1()
+                                .min_w_0()
+                                .py_1()
+                                .cursor_text()
+                                .text_sm()
+                                .truncate()
+                                .when(prop.value.is_empty(), |d| {
+                                    d.text_color(theme.muted_foreground).child("Empty")
+                                })
+                                .when(url.is_some(), |d| d.text_color(theme.primary))
+                                .when(!prop.value.is_empty(), |d| d.child(prop.value.clone()))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.edit_prop(ix, window, cx)
+                                })),
+                        )
+                        .when_some(url, |this, url| {
+                            this.child(
+                                icon_button(
+                                    ("note-prop-open", ix),
+                                    IconName::ExternalLink,
+                                    theme.muted_foreground,
+                                    "Open link",
+                                )
+                                .on_click(move |_, _, cx| cx.open_url(&url)),
+                            )
+                        })
+                        .into_any_element()
+                };
+                let name = prop.name.clone();
+                property_row(IconName::FileText, prop.name.clone(), theme)
+                    .group(group.clone())
+                    .child(value)
+                    .child(
+                        div()
+                            .opacity(0.)
+                            .group_hover(group, |s| s.opacity(1.))
+                            .child(
+                                icon_button(
+                                    ("note-prop-del", ix),
+                                    IconName::X,
+                                    theme.muted_foreground,
+                                    "Remove property",
+                                )
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    let store = this.store.clone();
+                                    confirm_delete(
+                                        window,
+                                        cx,
+                                        "Remove property?",
+                                        format!(
+                                            "“{name}” and its value will be removed from this note."
+                                        ),
+                                        move |_, cx| {
+                                            store.update(cx, |s, cx| s.remove_prop(id, ix, cx))
+                                        },
+                                    );
+                                })),
+                            ),
+                    )
+            });
+
+        let add = if self.adding_prop {
+            property_row(IconName::Plus, "", theme)
+                .child(
+                    div()
+                        .flex_1()
+                        .text_sm()
+                        .child(Input::new(&self.new_prop).appearance(false).px_0()),
+                )
+                .into_any_element()
+        } else {
+            h_flex()
+                .id("note-add-prop")
+                .h(px(32.))
+                .gap_2()
+                .cursor_pointer()
+                .text_sm()
+                .text_color(theme.muted_foreground)
+                .opacity(0.7)
+                .hover(|s| s.opacity(1.))
+                .child(
+                    Icon::new(IconName::Plus)
+                        .small()
+                        .text_color(theme.muted_foreground),
+                )
+                .child("Add a property")
+                .on_click(cx.listener(|this, _, window, cx| this.add_prop(window, cx)))
+                .into_any_element()
+        };
+
+        v_flex()
+            .pb_3()
+            .border_b_1()
+            .border_color(theme.border)
+            .child(
+                property_row(IconName::Clock, "Created", theme)
+                    .child(div().text_sm().child(when(note.created_at))),
+            )
+            .child(
+                property_row(IconName::Pencil, "Edited", theme)
+                    .child(div().text_sm().child(when(note.updated_at))),
+            )
+            .child(
+                property_row(IconName::Tags, "Tags", theme).child(
+                    h_flex()
+                        .flex_wrap()
+                        .gap_1()
+                        .children(
+                            tags.iter()
+                                .map(|c| category_tag(c.name.clone(), rgb(c.color).into())),
+                        )
+                        .child(picker),
+                ),
+            )
+            .children(props)
+            .child(add)
+    }
+
     fn render_body(&self, note: &Note, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let id = note.id;
         let parts = note.split();
@@ -440,14 +718,17 @@ impl NotesPage {
         v_flex()
             .text_base()
             .child(
-                TextView::markdown(("note-md", id), parts.content.to_string())
-                    .style(document_style())
-                    .selectable(true)
-                    .on_task_toggle(move |event, _, cx| {
-                        let marker = event.marker_range();
-                        let marker = marker.start + offset..marker.end + offset;
-                        store.update(cx, |s, cx| s.set_checkbox(id, marker, event.checked(), cx));
-                    }),
+                markdown_view(
+                    ("note-md", id),
+                    parts.content.to_string(),
+                    document_style(),
+                    NoteStore::dir(),
+                )
+                .on_task_toggle(move |event, _, cx| {
+                    let marker = event.marker_range();
+                    let marker = marker.start + offset..marker.end + offset;
+                    store.update(cx, |s, cx| s.set_checkbox(id, marker, event.checked(), cx));
+                }),
             )
             .child(write_here("note-tail", 160.))
             .into_any_element()
@@ -537,6 +818,7 @@ impl Render for NotesPage {
                                     .line_height(px(42.))
                                     .font_weight(FontWeight::BOLD),
                             )
+                            .child(self.render_properties(note, &theme, cx))
                             .child(self.render_body(note, &theme, cx)),
                     )
                     .into_any_element(),
