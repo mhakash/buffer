@@ -8,7 +8,6 @@ use gpui_kit::component::{
     checkbox::Checkbox,
     h_flex,
     input::{Escape, Input, InputEvent, InputState},
-    tab::{Tab, TabBar},
     v_flex,
 };
 use gpui_kit::{
@@ -28,6 +27,7 @@ use crate::{
 
 const COMPLETE_MS: u64 = 520;
 const TOAST_SECS: u64 = 4;
+const UNDO_SECS: u64 = 8;
 const CHART_DAYS: usize = 7;
 const CHART_H: f32 = 64.;
 
@@ -392,6 +392,18 @@ impl TasksPage {
             self.cancel_edit(window, cx);
         }
         self.last_deleted = self.store.update(cx, |store, cx| store.delete_task(id, cx));
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_secs(UNDO_SECS))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.last_deleted.as_ref().is_some_and(|t| t.id == id) {
+                    this.last_deleted = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
         cx.notify();
     }
 
@@ -759,22 +771,51 @@ impl TasksPage {
         counts: &[(Id, usize)],
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let muted = cx.theme().muted_foreground;
-        let tab = |label: &'static str, count: usize| {
-            Tab::new()
-                .label(label)
-                .suffix(div().text_xs().text_color(muted).child(count.to_string()))
-        };
-        let view_tabs = TabBar::new("view")
-            .segmented()
-            .small()
-            .selected_index(VIEWS.iter().position(|v| *v == self.view).unwrap_or(0))
-            .child(tab("To do", open))
-            .child(tab("Done", done))
-            .on_click(cx.listener(|this, ix: &usize, _, cx| {
-                this.view = VIEWS[*ix];
-                cx.notify();
-            }));
+        let theme = cx.theme().clone();
+        let view_tabs = h_flex().gap_1().children(VIEWS.into_iter().map(|view| {
+            let (label, count) = match view {
+                View::Todo => ("To do", open),
+                View::Done => ("Done", done),
+            };
+            let active = self.view == view;
+            h_flex()
+                .id(label)
+                .h(px(32.))
+                .gap_2()
+                .pl_3()
+                .pr_2()
+                .rounded_full()
+                .cursor_pointer()
+                .text_sm()
+                .when(active, |this| {
+                    this.bg(theme.secondary_active)
+                        .text_color(theme.foreground)
+                        .font_weight(FontWeight::SEMIBOLD)
+                })
+                .when(!active, |this| {
+                    this.text_color(theme.muted_foreground)
+                        .hover(|s| s.bg(theme.secondary))
+                })
+                .child(label)
+                .child(
+                    div()
+                        .min_w(px(20.))
+                        .px_1p5()
+                        .rounded_full()
+                        .text_xs()
+                        .text_center()
+                        .when(active, |this| {
+                            this.bg(theme.primary.opacity(0.16))
+                                .text_color(theme.primary)
+                        })
+                        .when(!active, |this| this.bg(theme.secondary))
+                        .child(count.to_string()),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.view = view;
+                    cx.notify();
+                }))
+        }));
 
         let filter_chips = categories
             .iter()
@@ -804,17 +845,19 @@ impl TasksPage {
             .justify_between()
             .gap_4()
             .child(div().flex_none().child(view_tabs))
-            .child(
-                h_flex()
-                    .flex_wrap()
-                    .justify_end()
-                    .gap_1()
-                    .child(
-                        chip("filter-all", "All", None, self.filter.is_none())
-                            .on_click(cx.listener(|this, _, _, cx| this.set_filter(None, cx))),
-                    )
-                    .children(filter_chips),
-            )
+            .when(!filter_chips.is_empty(), |this| {
+                this.child(
+                    h_flex()
+                        .flex_wrap()
+                        .justify_end()
+                        .gap_1()
+                        .child(
+                            chip("filter-all", "All", None, self.filter.is_none())
+                                .on_click(cx.listener(|this, _, _, cx| this.set_filter(None, cx))),
+                        )
+                        .children(filter_chips),
+                )
+            })
     }
 
     fn sections(&self, mut tasks: Vec<Task>) -> Vec<Section> {
@@ -879,7 +922,6 @@ impl TasksPage {
                 (View::Todo, true) => (IconName::Sun, "Nothing open in this category."),
                 (View::Done, _) => (IconName::ListTodo, "Completed tasks will show up here."),
             };
-            let ambient = prefs::get(cx).ambient;
             let badge = h_flex()
                 .justify_center()
                 .size(px(72.))
@@ -897,7 +939,7 @@ impl TasksPage {
                 .gap_4()
                 .py_16()
                 .text_color(theme.muted_foreground)
-                .child(fx::float(badge, "empty-badge", ambient))
+                .child(badge)
                 .child(div().text_sm().child(message))
                 .into_any_element();
         }
@@ -1225,24 +1267,39 @@ impl Render for TasksPage {
             .children(self.render_toast(&theme))
             .child(self.render_toolbar(open_count, done_count, &categories, &counts, cx))
             .when_some(self.last_deleted.as_ref(), |this, task| {
-                this.child(
-                    h_flex()
-                        .justify_between()
-                        .px_4()
-                        .py_1()
-                        .rounded_xl()
-                        .bg(theme.group_box)
-                        .text_sm()
-                        .text_color(theme.muted_foreground)
-                        .child(format!("Deleted “{}”", task.title))
-                        .child(
-                            Button::new("undo-delete")
-                                .ghost()
-                                .small()
-                                .label("Undo")
-                                .on_click(cx.listener(|this, _, _, cx| this.undo_delete(cx))),
-                        ),
-                )
+                let notice = h_flex()
+                    .gap_3()
+                    .pl_4()
+                    .pr_1()
+                    .py_1()
+                    .rounded_full()
+                    .bg(theme.secondary)
+                    .text_sm()
+                    .text_color(theme.muted_foreground)
+                    .child(
+                        div()
+                            .max_w(px(360.))
+                            .truncate()
+                            .child(format!("Deleted “{}”", task.title)),
+                    )
+                    .child(
+                        div()
+                            .id("undo-delete")
+                            .px_3()
+                            .py_0p5()
+                            .rounded_full()
+                            .cursor_pointer()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.primary)
+                            .hover(|s| s.bg(theme.primary.opacity(0.12)))
+                            .child("Undo")
+                            .on_click(cx.listener(|this, _, _, cx| this.undo_delete(cx))),
+                    );
+                this.child(h_flex().justify_center().child(fx::enter(
+                    notice,
+                    ("undo-notice", task.id),
+                    0,
+                )))
             })
             .child(self.render_list(visible, &categories, self.view == View::Todo, cx))
     }

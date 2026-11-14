@@ -253,22 +253,3 @@ pub fn pulse<E: IntoElement + Styled + 'static>(
     )
     .into_any_element()
 }
-
-/// Gentle vertical bob for decorative icons.
-pub fn float<E: IntoElement + Styled + 'static>(
-    el: E,
-    id: impl Into<ElementId>,
-    animate: bool,
-) -> AnyElement {
-    if !animate {
-        return el.into_any_element();
-    }
-    el.with_animation(
-        id,
-        Animation::new(Duration::from_millis(3200))
-            .repeat()
-            .with_max_fps(30.),
-        |el, t| el.relative().top(px((t * TAU).sin() * 4.)),
-    )
-    .into_any_element()
-}

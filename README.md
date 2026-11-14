@@ -58,7 +58,7 @@ Type in the composer and press Enter. Inline tokens (anywhere in the text):
 | `\#` `\!` `\\` | Literal `#`, `!`, or `\` in the title (prefix the word, e.g. `\#channel`) |
 
 Without tokens, the priority/category chips under the input apply. Hover a task for actions:
-drag the handle to reorder within a priority group (preview while dragging; saved on release), cycle priority, edit, delete (with Undo).
+drag the handle to reorder within a priority group (preview while dragging; saved on release), cycle priority, edit, delete (Undo pill stays 8 s).
 Tick the checkbox to complete (row slides out, a toast cheers you on); Done groups by day.
 The hero card above shows today's progress ring, your streak (consecutive days with a completion)
 and the last 7 days.
@@ -101,7 +101,7 @@ pulsing indicators (saves battery). macOS "Reduce motion" is honoured by every a
 | `src/workspace.rs` | Root view: aurora backdrop, title bar clock, sidebar, page transitions |
 | `src/tasks/` | Task model, quick-add parser, `TaskStore` entity |
 | `src/pages/` | One file per page; `Page` enum drives the sidebar |
-| `src/components/` | Thin wrappers over gpui-kit (`chip`, `icon_button`, `category_tag`, `card`), icon `Assets`, `fx` (glow, gradients, ring, enter/pulse/float animations) |
+| `src/components/` | Thin wrappers over gpui-kit (`chip`, `icon_button`, `category_tag`, `card`), icon `Assets`, `fx` (glow, gradients, ring, enter/pulse animations) |
 | `bacon.toml` | `make dev` rebuild/relaunch job |
 | `scripts/` | Icon generation, `.app` bundling, install |
 

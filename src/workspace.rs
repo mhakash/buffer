@@ -119,7 +119,7 @@ impl Workspace {
             )
     }
 
-    fn render_brand(&self, theme: &Theme, ambient: bool) -> impl IntoElement {
+    fn render_brand(&self, theme: &Theme) -> impl IntoElement {
         let mark = div()
             .flex()
             .items_center()
@@ -133,25 +133,21 @@ impl Workspace {
                     .text_color(theme.primary_foreground)
                     .size_5(),
             );
-        h_flex()
-            .gap_3()
-            .px_2()
-            .child(fx::float(mark, "brand-mark", ambient))
-            .child(
-                v_flex()
-                    .child(
-                        div()
-                            .text_base()
-                            .font_weight(FontWeight::BOLD)
-                            .child(APP_NAME),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(format!("v{}", env!("CARGO_PKG_VERSION"))),
-                    ),
-            )
+        h_flex().gap_3().px_2().child(mark).child(
+            v_flex()
+                .child(
+                    div()
+                        .text_base()
+                        .font_weight(FontWeight::BOLD)
+                        .child(APP_NAME),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(format!("v{}", env!("CARGO_PKG_VERSION"))),
+                ),
+        )
     }
 
     fn render_nav(&self, theme: &Theme, ambient: bool, cx: &mut Context<Self>) -> impl IntoElement {
@@ -330,7 +326,7 @@ impl Workspace {
             .bg(theme.sidebar)
             .border_1()
             .border_color(theme.border)
-            .child(self.render_brand(theme, ambient))
+            .child(self.render_brand(theme))
             .child(self.render_nav(theme, ambient, cx))
             .child(div().flex_1())
             .child(self.render_today_card(theme, cx))
