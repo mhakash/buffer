@@ -10,7 +10,7 @@ use gpui_kit::{
     },
 };
 
-const PILL: ButtonRounded = ButtonRounded::Size(px(999.));
+pub(super) const PILL: ButtonRounded = ButtonRounded::Size(px(999.));
 
 /// Flat, selectable pill with an optional colored dot.
 pub fn chip(

@@ -17,7 +17,11 @@ use gpui_kit::{
 };
 
 use crate::{
-    components::{category_tag, fx, icon_button},
+    components::{
+        category_tag,
+        confirm::{Confirmable, confirm, delete_button},
+        fx, icon_button,
+    },
     tasks::{Id, LinkKind, Task, TaskStore, classify, is_url},
 };
 
@@ -40,6 +44,7 @@ pub struct TaskDetail {
     subtask_input: Entity<InputState>,
     link_input: Entity<InputState>,
     log_input: Entity<InputState>,
+    armed: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -94,6 +99,7 @@ impl TaskDetail {
             subtask_input,
             link_input,
             log_input,
+            armed: None,
             _subscriptions: subscriptions,
         }
     }
@@ -267,6 +273,8 @@ impl TaskDetail {
             let sub_id = sub.id;
             let checked = sub.completed_at.is_some();
             let group = SharedString::from(format!("sub-{sub_id}"));
+            let key = SharedString::from(format!("sub-del-{sub_id}"));
+            let armed = self.armed.as_ref() == Some(&key);
             h_flex()
                 .group(group.clone())
                 .gap_2()
@@ -294,14 +302,18 @@ impl TaskDetail {
                 )
                 .child(
                     div()
-                        .opacity(0.)
-                        .group_hover(group, |s| s.opacity(1.))
+                        .when(!armed, |this| {
+                            this.opacity(0.).group_hover(group, |s| s.opacity(1.))
+                        })
                         .child(
-                            icon_button(("sub-del", sub_id), IconName::X, theme.danger, "Remove")
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.store
-                                        .update(cx, |s, cx| s.delete_subtask(id, sub_id, cx));
-                                })),
+                            delete_button(("sub-del", sub_id), armed, "Remove", cx).on_click(
+                                cx.listener(move |this, _, _, cx| {
+                                    if confirm(this, key.clone(), cx) {
+                                        this.store
+                                            .update(cx, |s, cx| s.delete_subtask(id, sub_id, cx));
+                                    }
+                                }),
+                            ),
                         ),
                 )
         });
@@ -340,6 +352,8 @@ impl TaskDetail {
                 LinkKind::Web => (IconName::Globe, theme.chart_1),
             };
             let group = SharedString::from(format!("link-{link_id}"));
+            let key = SharedString::from(format!("link-del-{link_id}"));
+            let armed = self.armed.as_ref() == Some(&key);
             h_flex()
                 .id(("link", link_id))
                 .group(group.clone())
@@ -381,20 +395,24 @@ impl TaskDetail {
                 )
                 .child(
                     h_flex()
-                        .opacity(0.)
-                        .group_hover(group, |s| s.opacity(1.))
+                        .when(!armed, |this| {
+                            this.opacity(0.).group_hover(group, |s| s.opacity(1.))
+                        })
                         .child(
                             Icon::new(IconName::ExternalLink)
                                 .xsmall()
                                 .text_color(theme.muted_foreground),
                         )
                         .child(
-                            icon_button(("link-del", link_id), IconName::X, theme.danger, "Remove")
-                                .on_click(cx.listener(move |this, _, _, cx| {
+                            delete_button(("link-del", link_id), armed, "Remove", cx).on_click(
+                                cx.listener(move |this, _, _, cx| {
                                     cx.stop_propagation();
-                                    this.store
-                                        .update(cx, |s, cx| s.delete_link(id, link_id, cx));
-                                })),
+                                    if confirm(this, key.clone(), cx) {
+                                        this.store
+                                            .update(cx, |s, cx| s.delete_link(id, link_id, cx));
+                                    }
+                                }),
+                            ),
                         ),
                 )
         });
@@ -423,6 +441,8 @@ impl TaskDetail {
         let entries = task.log.iter().rev().map(|entry| {
             let entry_id = entry.id;
             let group = SharedString::from(format!("log-{entry_id}"));
+            let key = SharedString::from(format!("log-del-{entry_id}"));
+            let armed = self.armed.as_ref() == Some(&key);
             h_flex()
                 .group(group.clone())
                 .items_start()
@@ -449,14 +469,18 @@ impl TaskDetail {
                 )
                 .child(
                     div()
-                        .opacity(0.)
-                        .group_hover(group, |s| s.opacity(1.))
+                        .when(!armed, |this| {
+                            this.opacity(0.).group_hover(group, |s| s.opacity(1.))
+                        })
                         .child(
-                            icon_button(("log-del", entry_id), IconName::X, theme.danger, "Remove")
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.store
-                                        .update(cx, |s, cx| s.delete_log(id, entry_id, cx));
-                                })),
+                            delete_button(("log-del", entry_id), armed, "Remove", cx).on_click(
+                                cx.listener(move |this, _, _, cx| {
+                                    if confirm(this, key.clone(), cx) {
+                                        this.store
+                                            .update(cx, |s, cx| s.delete_log(id, entry_id, cx));
+                                    }
+                                }),
+                            ),
                         ),
                 )
         });
@@ -469,6 +493,12 @@ impl TaskDetail {
         .child(Self::add_row(&self.log_input, theme))
         .child(v_flex().pt_1().children(entries))
         .into_any_element()
+    }
+}
+
+impl Confirmable for TaskDetail {
+    fn armed(&mut self) -> &mut Option<SharedString> {
+        &mut self.armed
     }
 }
 

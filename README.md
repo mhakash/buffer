@@ -60,6 +60,8 @@ Type in the composer and press Enter. Inline tokens (anywhere in the text):
 
 Without tokens, the priority/category chips under the input apply. Hover a task for actions:
 drag the handle to reorder within a priority group (preview while dragging; saved on release), cycle priority, edit, delete (Undo pill stays 8 s).
+Every delete/remove ✕ (tasks, subtasks, links, log entries, categories) asks first: it turns into a red
+"Delete?" pill; click again within 3 s to confirm.
 Tick the checkbox to complete (row slides out, a toast cheers you on); Done groups by day.
 The hero card above shows today's progress ring, your streak (consecutive days with a completion)
 and the last 7 days.

@@ -3,6 +3,7 @@
 mod assets;
 mod card;
 mod chip;
+pub mod confirm;
 pub mod fx;
 
 pub use assets::Assets;
