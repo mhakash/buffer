@@ -64,7 +64,7 @@ Type in the composer and press Enter. Inline tokens (anywhere in the text):
 | `https://…` | Attached as a link (Jira/GitLab/GitHub recognised); a link alone becomes the title, e.g. `PAY-88` |
 | `\#` `\!` `\\` | Literal `#`, `!`, or `\` in the title (prefix the word, e.g. `\#channel`) |
 
-Without tokens, the priority/category chips under the input apply (categories toggle; pick several). Hover a task for actions:
+Without tokens, the priority and category pills at the end of the input apply (each opens a menu; categories toggle, pick several). Hover a task for actions:
 drag the handle to reorder within a priority group (preview while dragging; saved on release), cycle priority, edit, delete (Undo pill stays 8 s).
 Every delete/remove ✕ (tasks, subtasks, links, log entries, categories) opens a confirmation dialog first.
 Tick the checkbox to complete (row slides out, a toast cheers you on); Done groups by day.

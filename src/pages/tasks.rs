@@ -3,15 +3,16 @@ use std::time::Duration;
 use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme, Icon, Sizable, Theme,
+    ActiveTheme, Disableable, Icon, Sizable, Theme,
     button::{Button, ButtonRounded, ButtonVariants},
     checkbox::Checkbox,
     h_flex,
     input::{Escape, Input, InputEvent, InputState},
+    menu::{DropdownMenu, PopupMenuItem},
     v_flex,
 };
 use gpui_kit::{
-    Animation, AnimationExt, AnyElement, App, Context, DragMoveEvent, Entity, EventEmitter,
+    Anchor, Animation, AnimationExt, AnyElement, App, Context, DragMoveEvent, Entity, EventEmitter,
     Focusable, FontWeight, Hsla, Render, SharedString, SpringAnimation, Subscription, Window, div,
     ease_in_out, prelude::*, px, rgb,
 };
@@ -134,17 +135,18 @@ impl Render for TaskDragPreview {
 
 impl TasksPage {
     pub fn new(store: Entity<TaskStore>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let composer = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("What needs doing?   #category #another  !high")
-        });
+        let composer = cx.new(|cx| InputState::new(window, cx).placeholder("What needs doing?"));
         let subscriptions = vec![
             cx.observe(&store, |_, _, cx| cx.notify()),
             cx.subscribe_in(
                 &composer,
                 window,
                 |this, _, event: &InputEvent, window, cx| {
-                    if let InputEvent::PressEnter { .. } = event {
-                        this.submit(window, cx);
+                    match event {
+                        InputEvent::PressEnter { .. } => this.submit(window, cx),
+                        // Add/Save enables once there's text.
+                        InputEvent::Change => cx.notify(),
+                        _ => {}
                     }
                 },
             ),
@@ -697,51 +699,101 @@ impl TasksPage {
         let editing = self.editing.is_some();
         let focused = self.composer.focus_handle(cx).contains_focused(window, cx);
 
-        let priority_chips = Priority::ALL.into_iter().map(|priority| {
-            chip(
-                ("draft-priority", priority as u64),
-                priority.label(),
-                Some(hex(priority.color())),
-                self.draft_priority == priority,
-            )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.draft_priority = priority;
-                cx.notify();
-            }))
-        });
+        let has_text = !self.composer.read(cx).value().trim().is_empty();
+        let page = cx.entity().downgrade();
 
-        let category_chips = std::iter::once(None)
-            .chain(categories.iter().map(Some))
-            .map(|category| {
-                let id = category.map(|c| c.id);
-                let selected = match id {
-                    Some(id) => self.draft_categories.contains(&id),
-                    None => self.draft_categories.is_empty(),
-                };
-                chip(
-                    ("draft-category", id.unwrap_or(0)),
-                    category.map_or("No category".to_string(), |c| c.name.clone()),
-                    category.map(|c| hex(c.color)),
-                    selected,
+        // Priority: one pill showing the current choice; menu to change it.
+        let priority = self.draft_priority;
+        let priority_color = hex(priority.color());
+        let priority_picker = {
+            let page = page.clone();
+            Button::new("draft-priority")
+                .ghost()
+                .small()
+                .rounded(ButtonRounded::Size(px(999.)))
+                .child(
+                    h_flex()
+                        .gap_1p5()
+                        .child(div().size_2().rounded_full().bg(priority_color))
+                        .child(priority.label()),
                 )
-                // Categories toggle independently; "No category" clears them.
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    match id {
-                        None => this.draft_categories.clear(),
-                        Some(id) => match this.draft_categories.iter().position(|c| *c == id) {
-                            Some(ix) => {
-                                this.draft_categories.remove(ix);
-                            }
-                            None => this.draft_categories.push(id),
-                        },
+                .tooltip("Priority  ·  or type !high")
+                .dropdown_menu_with_anchor(Anchor::TopRight, move |mut menu, _, _| {
+                    for p in Priority::ALL {
+                        let page = page.clone();
+                        menu = menu.item(
+                            PopupMenuItem::new(p.label())
+                                .checked(p == priority)
+                                .on_click(move |_, _, cx| {
+                                    let _ = page.update(cx, |this, cx| {
+                                        this.draft_priority = p;
+                                        cx.notify();
+                                    });
+                                }),
+                        );
                     }
-                    cx.notify();
-                }))
+                    menu.min_w(px(150.))
+                })
+        };
+
+        // Categories: summary of the selection; menu toggles each one.
+        let selected: Vec<&Category> = categories
+            .iter()
+            .filter(|c| self.draft_categories.contains(&c.id))
+            .collect();
+        let category_label = match selected.as_slice() {
+            [] => None,
+            [one] => Some(one.name.clone()),
+            [first, rest @ ..] => Some(format!("{} +{}", first.name, rest.len())),
+        };
+        let category_color = selected.first().map(|c| hex(c.color));
+        let all_categories = categories.to_vec();
+        let draft = self.draft_categories.clone();
+        let category_picker = Button::new("draft-categories")
+            .ghost()
+            .small()
+            .rounded(ButtonRounded::Size(px(999.)))
+            .map(|b| match (category_label, category_color) {
+                (Some(label), Some(color)) => b.child(
+                    h_flex()
+                        .gap_1p5()
+                        .child(div().size_2().rounded_full().bg(color))
+                        .child(label),
+                ),
+                _ => b.icon(Icon::new(IconName::Tags).text_color(theme.muted_foreground)),
+            })
+            .tooltip("Categories  ·  or type #name")
+            .dropdown_menu_with_anchor(Anchor::TopRight, move |mut menu, _, _| {
+                if all_categories.is_empty() {
+                    return menu.label("No categories yet — type #name to add one");
+                }
+                for category in &all_categories {
+                    let cid = category.id;
+                    let page = page.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(category.name.clone())
+                            .checked(draft.contains(&cid))
+                            .on_click(move |_, _, cx| {
+                                let _ = page.update(cx, |this, cx| {
+                                    match this.draft_categories.iter().position(|c| *c == cid) {
+                                        Some(ix) => {
+                                            this.draft_categories.remove(ix);
+                                        }
+                                        None => this.draft_categories.push(cid),
+                                    }
+                                    cx.notify();
+                                });
+                            }),
+                    );
+                }
+                menu.min_w(px(180.))
             });
 
-        v_flex()
-            .gap_3()
-            .p_4()
+        h_flex()
+            .gap_2()
+            .pl_4()
+            .pr_2()
+            .py_2()
             .rounded_2xl()
             .bg(theme.group_box)
             .border_1()
@@ -755,57 +807,35 @@ impl TasksPage {
             })
             .on_action(cx.listener(|this, _: &Escape, window, cx| this.cancel_edit(window, cx)))
             .child(
-                h_flex()
-                    .gap_3()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_none()
-                            .items_center()
-                            .justify_center()
-                            .size(px(28.))
-                            .rounded_full()
-                            .bg(fx::brand_gradient(&theme, 135.))
-                            .child(
-                                Icon::new(if editing {
-                                    IconName::Pencil
-                                } else {
-                                    IconName::Plus
-                                })
-                                .small()
-                                .text_color(theme.primary_foreground),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(Input::new(&self.composer).appearance(false)),
-                    )
-                    .child(
-                        Button::new("composer-submit")
-                            .primary()
-                            .rounded(ButtonRounded::Size(px(999.)))
-                            .label(if editing { "Save" } else { "Add" })
-                            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
-                    ),
+                Icon::new(if editing {
+                    IconName::Pencil
+                } else {
+                    IconName::Plus
+                })
+                .small()
+                .text_color(if editing || focused {
+                    theme.primary
+                } else {
+                    theme.muted_foreground
+                }),
             )
             .child(
-                h_flex()
-                    .flex_wrap()
-                    .gap_1()
-                    .children(priority_chips)
-                    .child(div().w(px(1.)).h_4().mx_2().bg(theme.border))
-                    .children(category_chips)
-                    .when(editing, |this| {
-                        this.child(
-                            div()
-                                .ml_auto()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child("Enter to save  ·  Esc to cancel"),
-                        )
-                    }),
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(Input::new(&self.composer).appearance(false)),
+            )
+            .child(priority_picker)
+            .child(category_picker)
+            .child(
+                Button::new("composer-submit")
+                    .primary()
+                    .small()
+                    .rounded(ButtonRounded::Size(px(999.)))
+                    .label(if editing { "Save" } else { "Add" })
+                    .disabled(!has_text)
+                    .when(editing, |b| b.tooltip("Enter to save  ·  Esc to cancel"))
+                    .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
             )
     }
 
