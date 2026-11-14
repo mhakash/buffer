@@ -1,4 +1,4 @@
-//! JSON persistence under the OS data dir (`~/Library/Application Support/Workdesk` on macOS).
+//! JSON persistence under the OS data dir (`~/Library/Application Support/Buffer` on macOS).
 
 use std::{
     fs, io,
@@ -10,14 +10,46 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::APP_NAME;
 
-/// `WORKDESK_DATA_DIR` overrides the location (useful for testing against throwaway data).
+/// The app was called Workdesk before 0.11; its data folder is moved on first launch.
+const LEGACY_NAME: &str = "Workdesk";
+
+/// `BUFFER_DATA_DIR` (or the pre-rename `WORKDESK_DATA_DIR`) overrides the location, for
+/// testing against throwaway data.
 pub fn data_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("WORKDESK_DATA_DIR") {
+    if let Some(dir) =
+        std::env::var_os("BUFFER_DATA_DIR").or_else(|| std::env::var_os("WORKDESK_DATA_DIR"))
+    {
         return dir.into();
     }
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(APP_NAME)
+    let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+    let dir = base.join(APP_NAME);
+    let legacy = base.join(LEGACY_NAME);
+    // Not migrated (the move failed): keep using the old folder rather than start empty.
+    if !dir.exists() && legacy.exists() {
+        return legacy;
+    }
+    dir
+}
+
+/// Moves the pre-rename data folder to its new name, once. Call before anything loads.
+pub fn migrate_legacy_dir() {
+    if std::env::var_os("BUFFER_DATA_DIR").is_some()
+        || std::env::var_os("WORKDESK_DATA_DIR").is_some()
+    {
+        return;
+    }
+    let Some(base) = dirs::data_dir() else { return };
+    let (dir, legacy) = (base.join(APP_NAME), base.join(LEGACY_NAME));
+    if !dir.exists()
+        && legacy.exists()
+        && let Err(err) = fs::rename(&legacy, &dir)
+    {
+        eprintln!(
+            "couldn't move {} to {}: {err}",
+            legacy.display(),
+            dir.display()
+        );
+    }
 }
 
 /// Absolute path of `rel` inside the data dir.

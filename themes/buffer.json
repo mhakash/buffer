@@ -1,9 +1,9 @@
 {
   "$schema": "https://github.com/longbridge/gpui-kit/raw/refs/heads/main/.theme-schema.json",
-  "name": "Workdesk",
+  "name": "Buffer",
   "themes": [
     {
-      "name": "Workdesk Light",
+      "name": "Buffer Light",
       "mode": "light",
       "radius": 10,
       "radius.lg": 18,
@@ -60,7 +60,7 @@
       }
     },
     {
-      "name": "Workdesk Dark",
+      "name": "Buffer Dark",
       "mode": "dark",
       "radius": 10,
       "radius.lg": 18,

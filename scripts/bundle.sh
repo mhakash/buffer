@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Builds a release binary and wraps it in target/release/Workdesk.app.
+# Builds a release binary and wraps it in target/release/Buffer.app.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP_NAME="Workdesk"
-BUNDLE_ID="com.workdesk.desktop"
-BIN="workdesk"
+APP_NAME="Buffer"
+BUNDLE_ID="local.buffer.desktop"
+BIN="buffer"
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 
 cargo build --release

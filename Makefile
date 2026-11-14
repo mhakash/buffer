@@ -3,7 +3,7 @@
 run:
 	cargo run
 
-# Rebuild + relaunch on save (throwaway data in /tmp/workdesk-dev). Needs `brew install bacon`.
+# Rebuild + relaunch on save (throwaway data in /tmp/buffer-dev). Needs `brew install bacon`.
 dev:
 	bacon dev
 
@@ -13,7 +13,7 @@ test:
 bundle:
 	./scripts/bundle.sh
 
-# Build + install/update /Applications/Workdesk.app and relaunch it.
+# Build + install/update ~/Applications/Buffer.app and relaunch it.
 install:
 	./scripts/install.sh
 

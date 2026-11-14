@@ -4,7 +4,7 @@ default_job = "dev"
 
 [jobs.dev]
 command = ["cargo", "run"]
-env.WORKDESK_DATA_DIR = "/tmp/workdesk-dev"
+env.BUFFER_DATA_DIR = "/tmp/buffer-dev"
 need_stdout = true
 allow_warnings = true
 background = false

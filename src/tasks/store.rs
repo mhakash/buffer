@@ -529,11 +529,11 @@ mod tests {
     /// The only test touching the data dir, so setting the env var can't race another test.
     #[test]
     fn migrates_v1_inline_details_to_task_folders() {
-        let dir = std::env::temp_dir().join(format!("workdesk-migrate-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("buffer-migrate-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         // SAFETY: no other test reads or writes the environment.
-        unsafe { std::env::set_var("WORKDESK_DATA_DIR", &dir) };
+        unsafe { std::env::set_var("BUFFER_DATA_DIR", &dir) };
         let v1 = r##"{"version":1,"next_id":9,"categories":[{"id":1,"name":"Work","color":1}],
             "tasks":[{"id":5,"title":"Ship","priority":"high","category":1,
             "created_at":"2026-01-01T00:00:00Z","notes":"# Plan\n- [ ] a",

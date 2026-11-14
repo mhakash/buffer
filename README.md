@@ -1,4 +1,6 @@
-# Workdesk
+# Buffer
+
+Personal work app (formerly **Workdesk**; data and install migrate automatically).
 
 Desktop app for custom work tooling, built on [GPUI](https://gpui.rs/) (Zed's UI framework) via
 [GPUI Kit](https://gpui-kit.com) (GPUI + ready-made components, Lucide icons, JSON themes).
@@ -9,26 +11,27 @@ Focus timer.
 ## Install / update
 
 ```sh
-make install     # builds release, installs ~/Applications/Workdesk.app, relaunches it
+make install     # builds release, installs ~/Applications/Buffer.app, relaunches it
 ```
 
 Re-run `make install` after any code change to update. The Dock pin and your data survive updates.
+The rename from Workdesk is the exception: the old app is removed, so pin Buffer once.
 Pin once: right-click the Dock icon → Options → Keep in Dock.
 
-Always installs to `~/Applications` (no admin needed) and removes any old `/Applications/Workdesk.app`,
+Always installs to `~/Applications` (no admin needed) and removes any old `/Applications/Buffer.app` and pre-rename `Workdesk.app`,
 so there's only ever one copy (two copies = two Dock icons).
 
 ## Develop
 
 ```sh
-make dev         # rebuild + relaunch on every save, throwaway data in /tmp/workdesk-dev (brew install bacon)
+make dev         # rebuild + relaunch on every save, throwaway data in /tmp/buffer-dev (brew install bacon)
 make run         # cargo run (debug, your real data)
 make test        # unit tests
 make icon        # regenerate assets/AppIcon.icns from scripts/make_icon.swift
-WORKDESK_DATA_DIR=/tmp/wd cargo run   # use throwaway data
+BUFFER_DATA_DIR=/tmp/wd cargo run   # use throwaway data
 ```
 
-Colors, radius and fonts live in `themes/workdesk.json` (gpui-kit theme format). In debug builds the
+Colors, radius and fonts live in `themes/buffer.json` (gpui-kit theme format). In debug builds the
 running app reloads them on save, no rebuild needed; release builds embed the file.
 
 macOS needs only Xcode Command Line Tools: gpui-kit enables GPUI's `runtime_shaders`, which compiles Metal shaders at startup instead of requiring the full Xcode `metal` compiler.
@@ -37,7 +40,8 @@ Bump `version` in `Cargo.toml` with each feature; it shows in the status bar and
 
 ## Data
 
-`~/Library/Application Support/Workdesk/` (Settings → Data → Show in Finder)
+`~/Library/Application Support/Buffer/` (Settings → Data → Show in Finder). A pre-rename
+`Workdesk` folder is moved there on first launch.
 
 | File | Contents |
 |---|---|
@@ -128,7 +132,7 @@ Task notes and notes render the same Markdown, plus:
 
 ## Look
 
-Palette lives in `themes/workdesk.json`; `chart.1`–`chart.5` drive the brand gradient, glows and
+Palette lives in `themes/buffer.json`; `chart.1`–`chart.5` drive the brand gradient, glows and
 the ambient backdrop. Settings → Appearance → Ambient motion turns off the drifting glow and
 pulsing indicators (saves battery). macOS "Reduce motion" is honoured by every animation.
 
@@ -156,7 +160,7 @@ pulsing indicators (saves battery). macOS "Reduce motion" is honoured by every a
 | `src/notes/` | `NoteStore` entity (`notes.json` + `notes/<id>.md`) |
 | `src/net.rs` | HTTP client GPUI uses for remote images |
 | `src/quotes.rs` | Daily sidebar line + time-of-day greeting |
-| `themes/workdesk.json` | Light + dark palettes (hot-reloaded in debug builds) |
+| `themes/buffer.json` | Light + dark palettes (hot-reloaded in debug builds) |
 | `src/workspace.rs` | Root view: aurora backdrop, title bar clock, sidebar, page transitions |
 | `src/tasks/` | Task model, quick-add parser, link classifier (`links.rs`), `TaskStore` entity (index + per-task folders, v1 migration) |
 | `src/pages/` | One file per page; `Page` enum drives the sidebar |

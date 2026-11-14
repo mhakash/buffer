@@ -23,7 +23,7 @@ impl Client {
             .into();
         Arc::new(Self {
             agent,
-            user_agent: HeaderValue::from_static(concat!("Workdesk/", env!("CARGO_PKG_VERSION"))),
+            user_agent: HeaderValue::from_static(concat!("Buffer/", env!("CARGO_PKG_VERSION"))),
         })
     }
 }

@@ -1,4 +1,4 @@
-# AGENTS.md — Workdesk
+# AGENTS.md — Buffer
 
 Personal macOS desktop app (Rust + [GPUI Kit](https://gpui-kit.com) `=0.9.1`, which re-exports its pinned GPUI fork `gpui-pre 0.3.12`). User-facing features, shortcuts, data files → [README.md](README.md). This file: how to change the code safely.
 
@@ -9,9 +9,9 @@ Personal macOS desktop app (Rust + [GPUI Kit](https://gpui-kit.com) `=0.9.1`, wh
 | Build / check | `cargo build` (first build ~3 min; incremental ~30 s) |
 | Tests | `cargo test` |
 | Format | `cargo fmt` (run before committing) |
-| Run dev, throwaway data | `WORKDESK_DATA_DIR=/tmp/wd cargo run` |
-| Dev loop (rebuild + relaunch on save) | `make dev` (`bacon.toml`, data in `/tmp/workdesk-dev`); theme JSON edits apply live without restart |
-| Ship to user | `make install` → rebuilds release, replaces `~/Applications/Workdesk.app` (deletes stale `/Applications` copy), relaunches |
+| Run dev, throwaway data | `BUFFER_DATA_DIR=/tmp/wd cargo run` |
+| Dev loop (rebuild + relaunch on save) | `make dev` (`bacon.toml`, data in `/tmp/buffer-dev`); theme JSON edits apply live without restart |
+| Ship to user | `make install` → rebuilds release, replaces `~/Applications/Buffer.app` (deletes stale `/Applications` and pre-rename `Workdesk.app` copies), relaunches |
 | Regenerate icon | `make icon` (edits `scripts/make_icon.swift` first) |
 
 Done = `cargo fmt` + `cargo build` with **zero warnings** + `cargo test` green. Ignore the `block`/`proc-macro-error2` future-incompat note (upstream).
@@ -30,7 +30,7 @@ main.rs        gpui_kit::application(), gpui_kit::open_window (wraps view in kit
 actions.rs     actions!(), key bindings (bind()), menu bar
 storage.rs     load/save JSON in data_dir()
 prefs.rs       settings.json (appearance, name, ambient) as a Global; prefs::update saves + repaints
-theme.rs       Appearance → kit Theme; loads themes/workdesk.json (watched in debug)
+theme.rs       Appearance → kit Theme; loads themes/buffer.json (watched in debug)
 workspace.rs   root view: aurora | TitleBar | custom sidebar | active page; owns TaskStore + FocusTimer
 tasks/         model.rs (Task + Subtask/Link/LogEntry, parse_quick_add, streak stats) · links.rs (URL → Jira/MR/… label) · store.rs (TaskStore entity)
 pages/task_detail.rs  side panel / full page (`full_page`); Workspace sizes it (`prefs.detail_width`, `ResizePanel` drag)
@@ -45,7 +45,7 @@ net.rs        HttpClient for GPUI (ureq on a thread); without it remote images n
 - **New page**: steps in README "Add a page". New feature with its own data → own module like `tasks/` with its own JSON file via `storage::{load, save}`.
 - **Imports**: `gpui_kit::*` is GPUI; components under `gpui_kit::component::*`; never add `gpui` as a direct dependency.
 - **Components**: use kit ones (`Button`, `Checkbox`, `Input`, `TabBar`, `Tag`, `Sidebar`, `Icon`, `h_flex`/`v_flex`, tooltips…) before hand-rolling. Kit source: `~/.cargo/registry/src/*/gpui-component-0.9.1/src`.
-- **Theme**: colors via `cx.theme()` (`gpui_kit::component::ActiveTheme`); our mapping: `group_box` = card/surface (translucent so the aurora shows), `secondary` = row hover, `secondary_active` = selected, `primary` = accent, `muted_foreground` = secondary text, `chart_1`–`chart_5` = brand gradient/glow/stat accents (`fx::brand_gradient`, `fx::wash`). Change the palette in `themes/workdesk.json`, not in code. No hard-coded colors in views except data-driven ones (priority/category hex in `tasks/model.rs`). Don't mark our themes `is_default` (breaks hot reload).
+- **Theme**: colors via `cx.theme()` (`gpui_kit::component::ActiveTheme`); our mapping: `group_box` = card/surface (translucent so the aurora shows), `secondary` = row hover, `secondary_active` = selected, `primary` = accent, `muted_foreground` = secondary text, `chart_1`–`chart_5` = brand gradient/glow/stat accents (`fx::brand_gradient`, `fx::wash`). Change the palette in `themes/buffer.json`, not in code. No hard-coded colors in views except data-driven ones (priority/category hex in `tasks/model.rs`). Don't mark our themes `is_default` (breaks hot reload).
 - **Style**: translucent surfaces with a hairline `theme.border`; no drop shadows, only colored glows via `fx::glow` (kit `"shadow": false`); `rounded_2xl` cards, `rounded_xl` rows, pill (`ButtonRounded::Size(px(999.))`) buttons/chips.
 - **Deletes**: never delete on one click — call `components::confirm::confirm_delete` (kit `AlertDialog` via `WindowExt::open_alert_dialog`; user rejected inline "Delete?" pills). Dialog dim = Workspace's fading `dialog-scrim`; theme `overlay` stays transparent because the kit backdrop can't fade. Kit motion is tuned in `theme::tune_motion`.
 - **Motion**: use `components::fx` (`enter` stagger, `ring`/`progress_bar` springs, `pulse`). No decorative looping motion on icons (user rejected bobbing icons as slop); repeating animations must be gated on `prefs::get(cx).ambient` and set `with_max_fps` — each one redraws the whole window. `with_animation` state is keyed by element id: an id that disappears for a frame replays on return (used for page/row entrances).
@@ -54,11 +54,11 @@ net.rs        HttpClient for GPUI (ureq on a thread); without it remote images n
 
 ## Persistence rules
 
-- Data dir: `storage::data_dir()` (`~/Library/Application Support/Workdesk`, or `$WORKDESK_DATA_DIR`).
+- Data dir: `storage::data_dir()` (`~/Library/Application Support/Buffer`, or `$BUFFER_DATA_DIR`; legacy `WORKDESK_DATA_DIR` still honoured). The app was **Workdesk** before 0.11: `storage::migrate_legacy_dir` renames the old folder on first launch, and `data_dir` falls back to it if that failed.
 - Tasks are split: list fields in `tasks.json` (index, `DATA_VERSION` 2); details in `tasks/<id>/task.json` + `notes.md`. Detail fields on `Task` are `#[serde(default, skip_serializing)]` (read from v1 for migration, never written to the index). Save details with `commit_task`, notes with `commit_notes`, index with `commit`.
 - Format changes must stay backward compatible: new fields get `#[serde(default)]`; never rename/remove fields without a migration in `TaskData`. Old user files must still load.
 - `storage::load` quarantines unparseable files; don't replace that with a silent default.
-- Never touch the user's real data dir in tests or manual checks — always set `WORKDESK_DATA_DIR`.
+- Never touch the user's real data dir in tests or manual checks — always set `BUFFER_DATA_DIR`.
 
 ## GPUI (gpui-pre 0.3.12) / kit gotchas
 
@@ -96,8 +96,8 @@ Screen recording + Accessibility are granted to the host app, so verify visual c
 | `mouse move\|click X Y`, `mouse drag X Y X2 Y2` | post mouse events (global points) |
 | `frames IN.mov DIR t…` / `sheet OUT.png COLS imgs…` | pull frames from a recording / contact sheet |
 
-1. Launch: `(WORKDESK_DATA_DIR=<scratch>/wd perl -e 'alarm 600; exec @ARGV' ./target/debug/workdesk &)` — the alarm guarantees it quits.
-2. The user's installed Workdesk opens at the **same position**; `move` the test window clear of it (activation alone won't raise an unbundled binary) and confirm with `top` before clicking — never click into the real app. Restore any window you moved.
+1. Launch: `(BUFFER_DATA_DIR=<scratch>/wd perl -e 'alarm 600; exec @ARGV' ./target/debug/buffer &)` — the alarm guarantees it quits.
+2. The user's installed Buffer opens at the **same position**; `move` the test window clear of it (activation alone won't raise an unbundled binary) and confirm with `top` before clicking — never click into the real app. Restore any window you moved.
 3. Click the title bar to activate (hover states need an active window), then drive with `mouse`.
 Screenshots are in pixels (2× on Retina): global point = window origin + pixel / 2.
 4. Stills: `screencapture -x -o -l<window id> out.png` (works while occluded). Animations: `screencapture -x -v -V 3 -R x,y,w,h rec.mov` in the background, act, then `frames` + `sheet` (stills are too slow to catch <300 ms motion).

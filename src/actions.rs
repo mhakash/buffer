@@ -5,7 +5,7 @@ use gpui_kit::{Action, App, KeyBinding, Menu, MenuItem, SystemMenuType, actions}
 use crate::{APP_NAME, theme};
 
 actions!(
-    workdesk,
+    buffer,
     [
         Quit,
         CloseWindow,

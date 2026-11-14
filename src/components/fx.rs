@@ -1,6 +1,6 @@
 //! Visual effects: ambient glow, gradients, progress ring, entrance animations.
 //!
-//! Colors come from the theme's `chart.1`–`chart.5` slots (`themes/workdesk.json`), so the whole
+//! Colors come from the theme's `chart.1`–`chart.5` slots (`themes/buffer.json`), so the whole
 //! look follows the palette. Every animation goes through `with_animation`/`with_spring`, which
 //! honour `App::reduce_motion`.
 

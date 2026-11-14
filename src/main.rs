@@ -16,7 +16,7 @@ use gpui_kit::{App, AppContext, Bounds, WindowBounds, WindowOptions, px, size};
 
 use crate::workspace::Workspace;
 
-pub const APP_NAME: &str = "Workdesk";
+pub const APP_NAME: &str = "Buffer";
 
 fn main() {
     let app = gpui_kit::application().with_assets(components::Assets);
@@ -27,6 +27,7 @@ fn main() {
         }
     });
 
+    storage::migrate_legacy_dir();
     app.run(|cx: &mut App| {
         gpui_kit::init(cx);
         cx.set_http_client(net::Client::new());

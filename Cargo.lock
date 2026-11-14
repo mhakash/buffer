@@ -669,6 +669,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "buffer"
+version = "0.11.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "data-url",
+ "dirs 6.0.0",
+ "futures",
+ "gpui-kit",
+ "mermaid-rs-renderer",
+ "serde",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
 name = "built"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7971,22 +7987,6 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
-
-[[package]]
-name = "workdesk"
-version = "0.10.0"
-dependencies = [
- "anyhow",
- "chrono",
- "data-url",
- "dirs 6.0.0",
- "futures",
- "gpui-kit",
- "mermaid-rs-renderer",
- "serde",
- "serde_json",
- "ureq",
-]
 
 [[package]]
 name = "writeable"

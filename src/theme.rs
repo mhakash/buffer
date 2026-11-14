@@ -1,6 +1,6 @@
 //! Light/dark appearance (persisted) on top of the gpui-kit `Theme` global.
 //!
-//! Colors live in `themes/workdesk.json` (gpui-kit theme format) and are embedded at build time.
+//! Colors live in `themes/buffer.json` (gpui-kit theme format) and are embedded at build time.
 //! Debug builds also watch `themes/`, so palette edits apply to the running app on save.
 
 use gpui_kit::{
@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::prefs;
 
-const THEMES: &str = include_str!("../themes/workdesk.json");
-const LIGHT: &str = "Workdesk Light";
-const DARK: &str = "Workdesk Dark";
+const THEMES: &str = include_str!("../themes/buffer.json");
+const LIGHT: &str = "Buffer Light";
+const DARK: &str = "Buffer Dark";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -52,7 +52,7 @@ pub fn init(cx: &mut App) {
     if let Err(err) = ThemeRegistry::global_mut(cx).load_themes_from_str(THEMES) {
         eprintln!("failed to parse embedded themes: {err:#}");
     }
-    select_workdesk_themes(cx);
+    select_app_themes(cx);
     Theme::change(prefs::get(cx).appearance.mode(), None, cx);
     tune_motion(cx);
 
@@ -60,7 +60,7 @@ pub fn init(cx: &mut App) {
     {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("themes");
         let watched = ThemeRegistry::watch_dir(dir, cx, |cx| {
-            select_workdesk_themes(cx);
+            select_app_themes(cx);
             Theme::change(Appearance::current(cx).mode(), None, cx);
             tune_motion(cx);
         });
@@ -70,7 +70,7 @@ pub fn init(cx: &mut App) {
     }
 }
 
-fn select_workdesk_themes(cx: &mut App) {
+fn select_app_themes(cx: &mut App) {
     let registry = ThemeRegistry::global(cx);
     let find = |name: &str| registry.themes().get(&SharedString::from(name)).cloned();
     let (light, dark) = (find(LIGHT), find(DARK));
