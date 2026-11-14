@@ -55,7 +55,7 @@ pub struct TasksPage {
     view: View,
     filter: Option<Id>,
     draft_priority: Priority,
-    draft_category: Option<Id>,
+    draft_categories: Vec<Id>,
     editing: Option<Id>,
     last_deleted: Option<Task>,
     drag_session: Option<DragSession>,
@@ -89,12 +89,12 @@ struct Section {
 struct TaskDrag {
     id: Id,
     title: SharedString,
-    category: Option<(SharedString, u32)>,
+    categories: Vec<(SharedString, u32)>,
 }
 
 struct TaskDragPreview {
     title: SharedString,
-    category: Option<(SharedString, u32)>,
+    categories: Vec<(SharedString, u32)>,
 }
 
 impl Render for TaskDragPreview {
@@ -124,16 +124,18 @@ impl Render for TaskDragPreview {
                     .text_color(theme.foreground)
                     .child(self.title.clone()),
             )
-            .when_some(self.category.as_ref(), |this, (name, color)| {
-                this.child(category_tag(name.clone(), hex(*color)))
-            })
+            .children(
+                self.categories
+                    .iter()
+                    .map(|(name, color)| category_tag(name.clone(), hex(*color))),
+            )
     }
 }
 
 impl TasksPage {
     pub fn new(store: Entity<TaskStore>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let composer = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("What needs doing?   #category  !high")
+            InputState::new(window, cx).placeholder("What needs doing?   #category #another  !high")
         });
         let subscriptions = vec![
             cx.observe(&store, |_, _, cx| cx.notify()),
@@ -153,7 +155,7 @@ impl TasksPage {
             view: View::Todo,
             filter: None,
             draft_priority: Priority::default(),
-            draft_category: None,
+            draft_categories: Vec::new(),
             editing: None,
             last_deleted: None,
             drag_session: None,
@@ -349,21 +351,28 @@ impl TasksPage {
             return;
         }
         let priority = parsed.priority.unwrap_or(self.draft_priority);
-        let fallback_category = self.draft_category;
+        let fallback = self.draft_categories.clone();
         let editing = self.editing.take();
         self.store.update(cx, |store, cx| {
-            let category = match parsed.category.as_deref() {
-                Some(name) => store.ensure_category(name, cx),
-                None => fallback_category,
+            let categories = if parsed.categories.is_empty() {
+                fallback
+            } else {
+                parsed
+                    .categories
+                    .iter()
+                    .filter_map(|name| store.ensure_category(name, cx))
+                    .collect()
             };
             match editing {
                 Some(id) => {
-                    store.update_task(id, parsed.title, priority, category, cx);
+                    store.update_task(id, parsed.title, priority, categories, cx);
                     for url in &parsed.links {
                         store.add_link(id, url, cx);
                     }
                 }
-                None => store.add_task(parsed.title, priority, category, parsed.links, cx),
+                None => {
+                    store.add_task(parsed.title, priority, categories, parsed.links, cx);
+                }
             }
         });
         self.clear_composer(window, cx);
@@ -377,7 +386,7 @@ impl TasksPage {
 
     fn reset_draft(&mut self) {
         self.draft_priority = Priority::default();
-        self.draft_category = self.filter;
+        self.draft_categories = self.filter.into_iter().collect();
     }
 
     fn cancel_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -394,7 +403,7 @@ impl TasksPage {
         };
         self.editing = Some(id);
         self.draft_priority = task.priority;
-        self.draft_category = task.category;
+        self.draft_categories = task.categories.clone();
         self.composer
             .update(cx, |input, cx| input.set_value(task.title, window, cx));
         self.focus_composer(window, cx);
@@ -432,7 +441,7 @@ impl TasksPage {
     fn set_filter(&mut self, filter: Option<Id>, cx: &mut Context<Self>) {
         self.filter = filter;
         if self.editing.is_none() {
-            self.draft_category = filter;
+            self.draft_categories = filter.into_iter().collect();
         }
         cx.notify();
     }
@@ -705,14 +714,27 @@ impl TasksPage {
             .chain(categories.iter().map(Some))
             .map(|category| {
                 let id = category.map(|c| c.id);
+                let selected = match id {
+                    Some(id) => self.draft_categories.contains(&id),
+                    None => self.draft_categories.is_empty(),
+                };
                 chip(
                     ("draft-category", id.unwrap_or(0)),
                     category.map_or("No category".to_string(), |c| c.name.clone()),
                     category.map(|c| hex(c.color)),
-                    self.draft_category == id,
+                    selected,
                 )
+                // Categories toggle independently; "No category" clears them.
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.draft_category = id;
+                    match id {
+                        None => this.draft_categories.clear(),
+                        Some(id) => match this.draft_categories.iter().position(|c| *c == id) {
+                            Some(ix) => {
+                                this.draft_categories.remove(ix);
+                            }
+                            None => this.draft_categories.push(id),
+                        },
+                    }
                     cx.notify();
                 }))
             });
@@ -989,11 +1011,13 @@ impl TasksPage {
                         task_rows.push(self.render_drop_placeholder(&theme));
                     }
                     BandRow::Task(task) => {
-                        let category = task
-                            .category
-                            .and_then(|id| categories.iter().find(|c| c.id == id));
+                        let task_categories: Vec<&Category> = task
+                            .categories
+                            .iter()
+                            .filter_map(|id| categories.iter().find(|c| c.id == *id))
+                            .collect();
                         let id = task.id;
-                        let row = self.render_row(&task, category, reorderable, cx);
+                        let row = self.render_row(&task, &task_categories, reorderable, cx);
                         task_rows.push(
                             fx::enter(div().child(row), ("row-in", id), row_ix).into_any_element(),
                         );
@@ -1056,7 +1080,7 @@ impl TasksPage {
     fn render_row(
         &self,
         task: &Task,
-        category: Option<&Category>,
+        categories: &[&Category],
         reorderable: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -1153,12 +1177,14 @@ impl TasksPage {
                 }),
             );
 
-        let category_drag = category.map(|c| (c.name.clone().into(), c.color));
         let drag_handle = reorderable.then(|| {
             let drag = TaskDrag {
                 id,
                 title: task.title.clone().into(),
-                category: category_drag,
+                categories: categories
+                    .iter()
+                    .map(|c| (c.name.clone().into(), c.color))
+                    .collect(),
             };
             div()
                 .id(("drag", id))
@@ -1174,7 +1200,7 @@ impl TasksPage {
                 .on_drag(drag, |drag: &TaskDrag, _, _, cx| {
                     cx.new(|_| TaskDragPreview {
                         title: drag.title.clone(),
-                        category: drag.category.clone(),
+                        categories: drag.categories.clone(),
                     })
                 })
         });
@@ -1230,9 +1256,27 @@ impl TasksPage {
                 .child(label)
         };
         let (sub_done, sub_total) = task.subtask_progress();
+        let today = Local::now().date_naive();
         let badges = h_flex()
             .flex_none()
             .gap_3()
+            .when_some(task.due.filter(|_| !done), |this, due| {
+                let color = if task.is_overdue(today) {
+                    theme.danger
+                } else if due == today {
+                    theme.warning
+                } else {
+                    muted
+                };
+                this.child(
+                    h_flex()
+                        .gap_1()
+                        .text_xs()
+                        .text_color(color)
+                        .child(Icon::new(IconName::Calendar).xsmall().text_color(color))
+                        .child(due_label(due, today)),
+                )
+            })
             .when(sub_total > 0, |this| {
                 this.child(badge(
                     IconName::ListChecks,
@@ -1274,8 +1318,31 @@ impl TasksPage {
                     )
                     .child(badges),
             )
-            .when_some(category, |this, category| {
-                this.child(category_tag(category.name.clone(), hex(category.color)).flex_none())
+            // Two tags fit comfortably; more collapse into a "+n" pill.
+            .children(categories.iter().take(2).map(|category| {
+                category_tag(category.name.clone(), hex(category.color)).flex_none()
+            }))
+            .when(categories.len() > 2, |this| {
+                let rest = categories[2..]
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                this.child(
+                    div()
+                        .id(("more-categories", id))
+                        .flex_none()
+                        .px_1p5()
+                        .rounded_full()
+                        .bg(theme.secondary)
+                        .text_xs()
+                        .text_color(muted)
+                        .child(format!("+{}", categories.len() - 2))
+                        .tooltip(move |window, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new(rest.clone())
+                                .build(window, cx)
+                        }),
+                )
             })
             .child(
                 div()
@@ -1328,13 +1395,16 @@ impl Render for TasksPage {
             .map(|c| {
                 (
                     c.id,
-                    in_view.iter().filter(|t| t.category == Some(c.id)).count(),
+                    in_view
+                        .iter()
+                        .filter(|t| t.categories.contains(&c.id))
+                        .count(),
                 )
             })
             .collect();
         let visible: Vec<Task> = in_view
             .into_iter()
-            .filter(|t| self.filter.is_none() || t.category == self.filter)
+            .filter(|t| self.filter.is_none_or(|f| t.categories.contains(&f)))
             .collect();
 
         v_flex()
@@ -1405,6 +1475,18 @@ fn age(ts: DateTime<Utc>) -> String {
         1..60 => format!("{minutes}m"),
         60..1440 => format!("{}h", minutes / 60),
         _ => format!("{}d", minutes / 1440),
+    }
+}
+
+/// `Today`, `Tomorrow`, `Yesterday`, `Fri`, `Nov 20`.
+pub fn due_label(due: NaiveDate, today: NaiveDate) -> String {
+    match (due - today).num_days() {
+        0 => "Today".into(),
+        1 => "Tomorrow".into(),
+        -1 => "Yesterday".into(),
+        2..=6 => due.format("%a").to_string(),
+        _ if due.year() == today.year() => due.format("%b %-d").to_string(),
+        _ => due.format("%b %-d, %Y").to_string(),
     }
 }
 

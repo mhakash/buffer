@@ -33,6 +33,7 @@ prefs.rs       settings.json (appearance, name, ambient) as a Global; prefs::upd
 theme.rs       Appearance → kit Theme; loads themes/workdesk.json (watched in debug)
 workspace.rs   root view: aurora | TitleBar | custom sidebar | active page; owns TaskStore + FocusTimer
 tasks/         model.rs (Task + Subtask/Link/LogEntry, parse_quick_add, streak stats) · links.rs (URL → Jira/MR/… label) · store.rs (TaskStore entity)
+pages/task_detail.rs  side panel / full page (`full_page`); Workspace sizes it (`prefs.detail_width`, `ResizePanel` drag)
 focus/         FocusTimer entity (pomodoro, focus.json)
 pages/         one Render view per sidebar page; Page enum lists them. task_detail.rs = right panel owned by Workspace; pages `cx.emit(OpenTask(id))`, Workspace subscribes and opens it
 components/    thin fn wrappers over kit components + icon Assets; fx.rs = glow/gradient/ring/animations
@@ -52,6 +53,7 @@ components/    thin fn wrappers over kit components + icon Assets; fx.rs = glow/
 ## Persistence rules
 
 - Data dir: `storage::data_dir()` (`~/Library/Application Support/Workdesk`, or `$WORKDESK_DATA_DIR`).
+- Tasks are split: list fields in `tasks.json` (index, `DATA_VERSION` 2); details in `tasks/<id>/task.json` + `notes.md`. Detail fields on `Task` are `#[serde(default, skip_serializing)]` (read from v1 for migration, never written to the index). Save details with `commit_task`, notes with `commit_notes`, index with `commit`.
 - Format changes must stay backward compatible: new fields get `#[serde(default)]`; never rename/remove fields without a migration in `TaskData`. Old user files must still load.
 - `storage::load` quarantines unparseable files; don't replace that with a silent default.
 - Never touch the user's real data dir in tests or manual checks — always set `WORKDESK_DATA_DIR`.
@@ -88,12 +90,13 @@ Screen recording + Accessibility are granted to the host app, so verify visual c
 | `list` | on-screen windows front→back: owner, PID, window id, bounds |
 | `top X Y` | owner of the topmost window at a point — check before **every** click |
 | `move PID X Y` | move that app's window (AX) |
-| `mouse move\|click X Y` | post mouse events (global points) |
+| `mouse move\|click X Y`, `mouse drag X Y X2 Y2` | post mouse events (global points) |
 | `frames IN.mov DIR t…` / `sheet OUT.png COLS imgs…` | pull frames from a recording / contact sheet |
 
 1. Launch: `(WORKDESK_DATA_DIR=<scratch>/wd perl -e 'alarm 600; exec @ARGV' ./target/debug/workdesk &)` — the alarm guarantees it quits.
 2. The user's installed Workdesk opens at the **same position**; `move` the test window clear of it (activation alone won't raise an unbundled binary) and confirm with `top` before clicking — never click into the real app. Restore any window you moved.
 3. Click the title bar to activate (hover states need an active window), then drive with `mouse`.
+Screenshots are in pixels (2× on Retina): global point = window origin + pixel / 2.
 4. Stills: `screencapture -x -o -l<window id> out.png` (works while occluded). Animations: `screencapture -x -v -V 3 -R x,y,w,h rec.mov` in the background, act, then `frames` + `sheet` (stills are too slow to catch <300 ms motion).
 5. `osascript` has no assistive access: use it only to read the frontmost process. Kill the test app and clean up afterwards.
 

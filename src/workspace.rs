@@ -5,8 +5,9 @@ use std::time::Duration;
 use chrono::Local;
 use gpui_kit::component::{ActiveTheme, Icon, Sizable, Theme, TitleBar, WindowExt, h_flex, v_flex};
 use gpui_kit::{
-    AnimationExt, AnyView, Context, Entity, FocusHandle, FontWeight, SharedString, SpringAnimation,
-    SpringConfig, Subscription, Task, Window, assets::IconName, div, prelude::*, px,
+    AnimationExt, AnyView, Context, DragMoveEvent, Entity, FocusHandle, FontWeight, SharedString,
+    SpringAnimation, SpringConfig, Subscription, Task, Window, assets::IconName, div, prelude::*,
+    px,
 };
 
 use crate::{
@@ -17,7 +18,10 @@ use crate::{
         icon_button,
     },
     focus::FocusTimer,
-    pages::{DetailEvent, FocusPage, OpenTask, PANEL_W, Page, SettingsPage, TaskDetail, TasksPage},
+    pages::{
+        DetailEvent, FocusPage, OpenTask, PANEL_MIN_W, Page, ResizePanel, SettingsPage, TaskDetail,
+        TasksPage,
+    },
     prefs, quotes,
     tasks::{TaskStore, completions_by_day, streak},
     theme::{self, Appearance},
@@ -25,6 +29,11 @@ use crate::{
 
 const NAV_ITEM_H: f32 = 40.;
 const NAV_GAP: f32 = 4.;
+const SIDEBAR_W: f32 = 236. + 12.;
+/// The list keeps at least this much room before the detail panel floats over it instead.
+const MIN_CONTENT_W: f32 = 480.;
+/// Right/bottom margin around the detail panel (`mr_3`).
+const EDGE: f32 = 12.;
 /// Critically damped (no overshoot), ~250 ms: the dim behind dialogs fades in and out.
 const SCRIM_SPRING: SpringConfig = SpringConfig::new(300., 34.6, 1.);
 
@@ -83,6 +92,7 @@ impl Workspace {
                         this.tasks.update(cx, |t, cx| t.set_selected(None, cx));
                         cx.notify();
                     }
+                    DetailEvent::Layout => cx.notify(),
                 }),
             ],
             _clock: clock,
@@ -106,6 +116,13 @@ impl Workspace {
 
     fn navigate(&mut self, page: Page, window: &mut Window, cx: &mut Context<Self>) {
         self.active = page;
+        // A task open as a full page covers the page; leaving it closes the task.
+        if self.detail.read(cx).is_full_page() {
+            self.detail.update(cx, |d, cx| {
+                d.set_full_page(false, cx);
+                d.close(cx);
+            });
+        }
         match page {
             Page::Tasks => self
                 .tasks
@@ -418,10 +435,11 @@ impl Render for Workspace {
             self.detail.update(cx, |d, cx| d.close(cx));
         }
         let show_detail = self.active != Page::Settings && self.detail.read(cx).task_id().is_some();
+        let full_page = show_detail && self.detail.read(cx).is_full_page();
+        let viewport_w = f32::from(window.viewport_size().width);
+        let panel_w = clamp_panel_width(prefs::get(cx).detail_width, viewport_w);
         // Dock the panel beside the page only if the page keeps room to breathe.
-        const SIDEBAR_W: f32 = 236. + 12.;
-        const MIN_CONTENT_W: f32 = 480.;
-        let docked = window.viewport_size().width >= px(SIDEBAR_W + MIN_CONTENT_W + PANEL_W + 12.);
+        let docked = viewport_w >= SIDEBAR_W + MIN_CONTENT_W + panel_w + EDGE;
 
         let page = div()
             .w_full()
@@ -456,6 +474,19 @@ impl Render for Workspace {
                 this.timer.update(cx, |timer, cx| timer.toggle(cx));
             }))
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
+            // Dragging the detail panel's left edge: width follows the pointer; saved on drop.
+            .on_drag_move::<ResizePanel>(cx.listener(
+                |_, event: &DragMoveEvent<ResizePanel>, window, cx| {
+                    let viewport_w = f32::from(window.viewport_size().width);
+                    let width = viewport_w - f32::from(event.event.position.x) - EDGE;
+                    let width = clamp_panel_width(width, viewport_w);
+                    if (prefs::get(cx).detail_width - width).abs() >= 1. {
+                        prefs::set_detail_width(cx, width);
+                        cx.notify();
+                    }
+                },
+            ))
+            .on_drop::<ResizePanel>(|_, _, cx| prefs::save(cx))
             .relative()
             .size_full()
             .overflow_hidden()
@@ -476,27 +507,46 @@ impl Render for Workspace {
                             .flex_1()
                             .min_h_0()
                             .child(self.render_sidebar(&theme, cx))
-                            .child(
-                                div()
-                                    .id("content")
-                                    .flex_1()
-                                    .min_w_0()
-                                    .overflow_y_scroll()
-                                    .child(fx::enter(page, ("page", page_id), 0)),
-                            )
-                            .when(show_detail && docked, |this| {
+                            .when(!full_page, |this| {
                                 this.child(
-                                    div().flex_none().mr_3().mb_3().child(self.detail.clone()),
+                                    div()
+                                        .id("content")
+                                        .flex_1()
+                                        .min_w_0()
+                                        .overflow_y_scroll()
+                                        .child(fx::enter(page, ("page", page_id), 0)),
+                                )
+                            })
+                            .when(full_page, |this| {
+                                this.child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .ml_3()
+                                        .mr_3()
+                                        .mb_3()
+                                        .child(self.detail.clone()),
+                                )
+                            })
+                            .when(show_detail && !full_page && docked, |this| {
+                                this.child(
+                                    div()
+                                        .flex_none()
+                                        .w(px(panel_w))
+                                        .mr_3()
+                                        .mb_3()
+                                        .child(self.detail.clone()),
                                 )
                             })
                             // Too narrow to share: float the panel over the content instead.
-                            .when(show_detail && !docked, |this| {
+                            .when(show_detail && !full_page && !docked, |this| {
                                 this.child(
                                     div()
                                         .absolute()
                                         .top_0()
                                         .bottom_3()
                                         .right_3()
+                                        .w(px(panel_w))
                                         .rounded_2xl()
                                         .bg(theme.background)
                                         .shadow(vec![gpui_kit::BoxShadow {
@@ -529,4 +579,16 @@ impl Render for Workspace {
                     ),
             )
     }
+}
+
+/// Keeps the side panel between its minimum and what leaves the list usable (or, when the
+/// window is too narrow to dock, what still fits beside the sidebar).
+fn clamp_panel_width(width: f32, viewport_w: f32) -> f32 {
+    let docked_max = viewport_w - SIDEBAR_W - MIN_CONTENT_W - EDGE;
+    let max = if docked_max >= PANEL_MIN_W {
+        docked_max
+    } else {
+        viewport_w - SIDEBAR_W - 2. * EDGE
+    };
+    width.min(max).max(PANEL_MIN_W)
 }

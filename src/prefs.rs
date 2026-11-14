@@ -18,6 +18,13 @@ pub struct Prefs {
     /// Drifting background glow + idle animations. Off saves CPU.
     #[serde(default = "yes")]
     pub ambient: bool,
+    /// Task detail side-panel width (px), set by dragging its left edge.
+    #[serde(default = "detail_width")]
+    pub detail_width: f32,
+}
+
+fn detail_width() -> f32 {
+    crate::pages::PANEL_DEFAULT_W
 }
 
 fn yes() -> bool {
@@ -30,6 +37,7 @@ impl Default for Prefs {
             appearance: Appearance::default(),
             name: String::new(),
             ambient: true,
+            detail_width: detail_width(),
         }
     }
 }
@@ -45,12 +53,21 @@ pub fn get(cx: &App) -> &Prefs {
     cx.global::<Prefs>()
 }
 
-/// Mutates, persists and repaints every window.
-pub fn update(cx: &mut App, f: impl FnOnce(&mut Prefs)) {
-    f(cx.global_mut::<Prefs>());
+/// Live-updates the panel width while dragging; [`save`] persists it on drop.
+pub fn set_detail_width(cx: &mut App, width: f32) {
+    cx.global_mut::<Prefs>().detail_width = width;
+}
+
+pub fn save(cx: &App) {
     if let Err(err) = storage::save(FILE, cx.global::<Prefs>()) {
         eprintln!("failed to save settings: {err:#}");
     }
+}
+
+/// Mutates, persists and repaints every window.
+pub fn update(cx: &mut App, f: impl FnOnce(&mut Prefs)) {
+    f(cx.global_mut::<Prefs>());
+    save(cx);
     cx.refresh_windows();
 }
 

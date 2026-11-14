@@ -6,18 +6,25 @@ use gpui_kit::{AssetSource, Result, SharedString, assets::icon_assets};
 icon_assets!(
     ExtraIcons,
     [
+        ArrowLeft,
         Brain,
+        Calendar,
         CircleDot,
+        Clock,
         Coffee,
+        Eye,
         Flag,
         Flame,
+        FolderOpen,
         GitPullRequest,
         GripVertical,
         Link,
         ListChecks,
         ListTodo,
+        Maximize2,
         Moon,
         NotebookPen,
+        PanelRightOpen,
         Pause,
         Pencil,
         Play,
@@ -26,7 +33,9 @@ icon_assets!(
         ScrollText,
         SkipForward,
         Sparkles,
+        SquarePen,
         Sun,
+        Tags,
         Target,
         Ticket,
         Timer,
@@ -58,14 +67,23 @@ impl AssetSource for Assets {
 
 #[cfg(test)]
 mod tests {
-    use gpui_kit::assets::{IconName, IconNamed};
+    use gpui_kit::assets::IconName;
 
     use super::*;
 
     #[test]
     fn every_used_icon_has_an_asset() {
         for name in [
+            IconName::ArrowLeft,
             IconName::BookOpen,
+            IconName::Calendar,
+            IconName::Clock,
+            IconName::Eye,
+            IconName::FolderOpen,
+            IconName::Maximize2,
+            IconName::PanelRightOpen,
+            IconName::SquarePen,
+            IconName::Tags,
             IconName::Brain,
             IconName::Check,
             IconName::CircleDot,

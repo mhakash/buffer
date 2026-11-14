@@ -81,7 +81,7 @@ impl SettingsPage {
                 let (open, done) = store
                     .tasks()
                     .iter()
-                    .filter(|t| t.category == Some(category.id))
+                    .filter(|t| t.categories.contains(&category.id))
                     .fold((0, 0), |(open, done), t| {
                         if t.is_done() {
                             (open, done + 1)
@@ -139,7 +139,7 @@ impl SettingsPage {
                                     window,
                                     cx,
                                     "Delete category?",
-                                    format!("“{name}” will be removed. Its tasks are kept, uncategorised."),
+                                    format!("“{name}” will be removed. Its tasks are kept."),
                                     move |_, cx| {
                                         store.update(cx, |s, cx| s.delete_category(id, cx));
                                     },

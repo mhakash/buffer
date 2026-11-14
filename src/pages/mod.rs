@@ -7,7 +7,9 @@ use gpui_kit::assets::IconName;
 
 pub use focus::FocusPage;
 pub use settings::SettingsPage;
-pub use task_detail::{DetailEvent, OpenTask, PANEL_W, TaskDetail};
+pub use task_detail::{
+    DetailEvent, OpenTask, PANEL_DEFAULT_W, PANEL_MIN_W, ResizePanel, TaskDetail,
+};
 pub use tasks::TasksPage;
 
 /// Every top-level page shown in the sidebar. Add a variant here to add a page.

@@ -76,6 +76,8 @@ pub const CATEGORY_COLORS: [u32; 8] = [
     0x8b5cf6, 0x10b981, 0xf97316, 0x06b6d4, 0xec4899, 0x84cc16, 0xeab308, 0x6366f1,
 ];
 
+/// One task. The index (`tasks.json`) holds the fields shown in lists; the rest lives in the
+/// task's own folder (`tasks/<id>/`, see [`TaskDetails`]) so editing notes rewrites only that task.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Task {
     pub id: Id,
@@ -85,20 +87,75 @@ pub struct Task {
     #[serde(default)]
     pub sort_order: u64,
     #[serde(default)]
+    pub categories: Vec<Id>,
+    /// Single category of pre-0.7 files; folded into `categories` on load.
+    #[serde(default, skip_serializing)]
     pub category: Option<Id>,
     pub created_at: DateTime<Utc>,
     #[serde(default)]
     pub completed_at: Option<DateTime<Utc>>,
-    /// Free-form working notes.
     #[serde(default)]
+    pub due: Option<NaiveDate>,
+    /// Last edit to the task or its details.
+    #[serde(default)]
+    pub updated_at: Option<DateTime<Utc>>,
+    // Details: stored in `tasks/<id>/`. `default` (without `skip_deserializing`) still reads them
+    // from pre-0.7 files, where they were inline, so they can be migrated.
+    /// Markdown notes (`tasks/<id>/notes.md`).
+    #[serde(default, skip_serializing)]
     pub notes: String,
+    #[serde(default, skip_serializing)]
+    pub subtasks: Vec<Subtask>,
+    #[serde(default, skip_serializing)]
+    pub links: Vec<Link>,
+    /// Timestamped progress entries, oldest first.
+    #[serde(default, skip_serializing)]
+    pub log: Vec<LogEntry>,
+}
+
+/// On-disk shape of `tasks/<id>/task.json`; notes are beside it in `notes.md`.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct TaskDetails {
     #[serde(default)]
     pub subtasks: Vec<Subtask>,
     #[serde(default)]
     pub links: Vec<Link>,
-    /// Timestamped progress entries, oldest first.
     #[serde(default)]
     pub log: Vec<LogEntry>,
+}
+
+impl Task {
+    pub fn dir(id: Id) -> String {
+        format!("tasks/{id}")
+    }
+
+    pub fn details(&self) -> TaskDetails {
+        TaskDetails {
+            subtasks: self.subtasks.clone(),
+            links: self.links.clone(),
+            log: self.log.clone(),
+        }
+    }
+
+    pub fn set_details(&mut self, details: TaskDetails, notes: String) {
+        self.subtasks = details.subtasks;
+        self.links = details.links;
+        self.log = details.log;
+        self.notes = notes;
+    }
+
+    /// Moves a pre-0.7 single `category` into `categories`.
+    pub fn migrate_category(&mut self) {
+        if let Some(id) = self.category.take()
+            && !self.categories.contains(&id)
+        {
+            self.categories.insert(0, id);
+        }
+    }
+
+    pub fn is_overdue(&self, today: NaiveDate) -> bool {
+        !self.is_done() && self.due.is_some_and(|d| d < today)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -177,6 +234,9 @@ pub fn streak(by_day: &BTreeMap<NaiveDate, usize>, today: NaiveDate) -> usize {
     count
 }
 
+/// Index format version: 1 = details inline in `tasks.json`; 2 = details in `tasks/<id>/`.
+pub const DATA_VERSION: u32 = 2;
+
 /// On-disk shape of `tasks.json`. Add fields with `#[serde(default)]` to stay backward compatible.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TaskData {
@@ -199,7 +259,7 @@ impl Default for TaskData {
             })
             .collect();
         Self {
-            version: 1,
+            version: DATA_VERSION,
             next_id: categories.len() as Id + 1,
             categories,
             tasks: Vec::new(),
@@ -213,10 +273,11 @@ pub struct QuickAdd {
     /// `http(s)://…` words, removed from the title.
     pub links: Vec<String>,
     pub priority: Option<Priority>,
-    pub category: Option<String>,
+    /// Every `#name`, in order, without loose duplicates.
+    pub categories: Vec<String>,
 }
 
-/// Parses `Fix login bug #work !high https://…` into title, category, priority and links.
+/// Parses `Fix login bug #work #review !high https://…` into title, categories, priority and links.
 /// With only a link, the title falls back to the link's label (e.g. `PROJ-123`).
 /// Unrecognised `!tokens` stay in the title. Prefix `#` or `!` with `\` for literals (`\#tag`, `\!wow`).
 pub fn parse_quick_add(input: &str) -> QuickAdd {
@@ -230,7 +291,13 @@ pub fn parse_quick_add(input: &str) -> QuickAdd {
         if is_url(word) {
             parsed.links.push(word.to_string());
         } else if let Some(name) = word.strip_prefix('#').filter(|name| !name.is_empty()) {
-            parsed.category = Some(name.to_string());
+            if !parsed
+                .categories
+                .iter()
+                .any(|c| category_key(c) == category_key(name))
+            {
+                parsed.categories.push(name.to_string());
+            }
         } else if let Some(priority) = word.strip_prefix('!').and_then(Priority::parse) {
             parsed.priority = Some(priority);
         } else {
@@ -272,6 +339,20 @@ fn unescape_quick_add_word(word: &str) -> String {
     out
 }
 
+/// `notes` with the task-list marker at `marker` (`[ ]`/`[x]`, brackets included) set to
+/// `checked`; `None` if the range doesn't point at a marker (notes changed underneath).
+pub fn set_checkbox(notes: &str, marker: std::ops::Range<usize>, checked: bool) -> Option<String> {
+    let current = notes.get(marker.clone())?;
+    if !matches!(current, "[ ]" | "[x]" | "[X]") {
+        return None;
+    }
+    let mut out = String::with_capacity(notes.len());
+    out.push_str(&notes[..marker.start]);
+    out.push_str(if checked { "[x]" } else { "[ ]" });
+    out.push_str(&notes[marker.end..]);
+    Some(out)
+}
+
 /// Comparison key so `#follow-up`, `#followup` and "Follow up" all hit the same category.
 pub fn category_key(name: &str) -> String {
     name.chars()
@@ -289,7 +370,14 @@ mod tests {
         let parsed = parse_quick_add("!urgent Fix login #work bug");
         assert_eq!(parsed.title, "Fix login bug");
         assert_eq!(parsed.priority, Some(Priority::Urgent));
-        assert_eq!(parsed.category.as_deref(), Some("work"));
+        assert_eq!(parsed.categories, vec!["work"]);
+    }
+
+    #[test]
+    fn collects_several_categories() {
+        let parsed = parse_quick_add("Ship #work #Review #review");
+        assert_eq!(parsed.title, "Ship");
+        assert_eq!(parsed.categories, vec!["work", "Review"]);
     }
 
     #[test]
@@ -310,19 +398,50 @@ mod tests {
     }
 
     #[test]
+    fn v1_inline_details_load_but_are_not_written_to_the_index() {
+        let json = r#"{"id":1,"title":"x","priority":"high","category":4,
+            "created_at":"2026-01-01T00:00:00Z","notes":"hi",
+            "subtasks":[{"id":2,"title":"s"}]}"#;
+        let mut task: Task = serde_json::from_str(json).unwrap();
+        assert_eq!(task.notes, "hi");
+        assert_eq!(task.subtasks.len(), 1);
+        task.migrate_category();
+        assert_eq!(task.categories, vec![4]);
+        let out = serde_json::to_string(&task).unwrap();
+        assert!(
+            !out.contains("notes") && !out.contains("subtasks") && !out.contains("\"category\"")
+        );
+    }
+
+    #[test]
     fn keeps_unknown_bang_and_bare_hash() {
         let parsed = parse_quick_add("Say hi! # !wow");
         assert_eq!(parsed.title, "Say hi! # !wow");
         assert_eq!(parsed.priority, None);
-        assert_eq!(parsed.category, None);
+        assert!(parsed.categories.is_empty());
     }
 
     #[test]
     fn backslash_escapes_hash_and_bang() {
         let parsed = parse_quick_add(r"Post in \#random \!urgent #work");
         assert_eq!(parsed.title, "Post in #random !urgent");
-        assert_eq!(parsed.category.as_deref(), Some("work"));
+        assert_eq!(parsed.categories, vec!["work"]);
         assert_eq!(parsed.priority, None);
+    }
+
+    #[test]
+    fn toggles_markdown_checkboxes_in_place() {
+        let notes = "- [ ] one\n- [x] two";
+        assert_eq!(
+            set_checkbox(notes, 2..5, true).unwrap(),
+            "- [x] one\n- [x] two"
+        );
+        assert_eq!(
+            set_checkbox(notes, 12..15, false).unwrap(),
+            "- [ ] one\n- [ ] two"
+        );
+        assert!(set_checkbox(notes, 0..3, true).is_none());
+        assert!(set_checkbox(notes, 40..43, true).is_none());
     }
 
     #[test]
