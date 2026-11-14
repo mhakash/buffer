@@ -10,4 +10,4 @@ mod markdown;
 pub use assets::Assets;
 pub use card::card;
 pub use chip::{category_tag, chip, icon_button};
-pub use markdown::markdown_style;
+pub use markdown::{document_style, markdown_style};

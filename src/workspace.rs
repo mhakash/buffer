@@ -444,6 +444,7 @@ impl Render for Workspace {
         let show_detail =
             self.active.shows_task_detail() && self.detail.read(cx).task_id().is_some();
         let full_page = show_detail && self.detail.read(cx).is_full_page();
+        let notes_page = self.active == Page::Notes;
         let viewport_w = f32::from(window.viewport_size().width);
         let panel_w = clamp_panel_width(prefs::get(cx).detail_width, viewport_w);
         // Dock the panel beside the page only if the page keeps room to breathe.
@@ -524,7 +525,15 @@ impl Render for Workspace {
                             .flex_1()
                             .min_h_0()
                             .child(self.render_sidebar(&theme, cx))
-                            .when(!full_page, |this| {
+                            // Notes manages its own panes and scrolling across the whole area.
+                            .when(notes_page, |this| {
+                                this.child(div().flex_1().min_w_0().mr_3().mb_3().child(fx::enter(
+                                    div().size_full().child(self.notes.clone()),
+                                    ("page", page_id),
+                                    0,
+                                )))
+                            })
+                            .when(!full_page && !notes_page, |this| {
                                 this.child(
                                     div()
                                         .id("content")

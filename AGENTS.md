@@ -35,7 +35,7 @@ workspace.rs   root view: aurora | TitleBar | custom sidebar | active page; owns
 tasks/         model.rs (Task + Subtask/Link/LogEntry, parse_quick_add, streak stats) · links.rs (URL → Jira/MR/… label) · store.rs (TaskStore entity)
 pages/task_detail.rs  side panel / full page (`full_page`); Workspace sizes it (`prefs.detail_width`, `ResizePanel` drag)
 focus/         FocusTimer entity (pomodoro, focus.json)
-notes/         NoteStore entity (notes.json index + notes/<id>.md); pages/notes.rs = list + editor
+notes/         NoteStore entity (notes.json index + notes/<id>.md; first line = title via split/compose); pages/notes.rs = list + document panes, fills the content area itself (Workspace skips the max-width wrapper)
 pages/         one Render view per sidebar page; Page enum lists them. task_detail.rs = right panel owned by Workspace; pages `cx.emit(OpenTask(id))`, Workspace subscribes and opens it
 components/    thin fn wrappers over kit components + icon Assets; fx.rs = glow/gradient/ring/animations
 ```
@@ -73,6 +73,7 @@ API source of truth: `~/.cargo/registry/src/*/{gpui-pre-0.3.12,gpui-base-0.9.1,g
 | Window chrome | transparent title bar (`TitleBar::title_bar_options` + `TitleBar::window_options`); kit `TitleBar` owns dragging, so keep it rendered at the top |
 | Focus state of an `InputState` | `entity.focus_handle(cx)` needs `gpui_kit::Focusable` in scope |
 | `BoxShadow` literal | needs `inset: false` |
+| Big text in `Input`/`Textarea` ignores parent `text_*` | kit pins height/size/padding; override on the input (`.h() .text_size() .px_0()`); Textarea padding comes from `with_size` (see `pages/notes.rs`) |
 | `on_reopen` isn't on `App` | call on `Application` before `.run()` (see `main.rs`) |
 | Closure in `.map()` needs `cx` → "captured variable cannot escape `FnMut`" | take `cx: &Context<Self>` (not `&mut`) in render helpers; `cx.listener` only needs `&` |
 | Borrow conflict reading theme then calling `cx.listener` | `let theme = cx.theme().clone();` at top of render |

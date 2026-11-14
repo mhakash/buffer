@@ -12,3 +12,13 @@ pub fn markdown_style() -> TextViewStyle {
             _ => px(14.),
         })
 }
+
+/// Full-width notes read like a document: body `text_base`, real heading steps.
+pub fn document_style() -> TextViewStyle {
+    TextViewStyle::default().heading_font_size(|level, _| match level {
+        1 => px(26.),
+        2 => px(21.),
+        3 => px(18.),
+        _ => px(16.),
+    })
+}

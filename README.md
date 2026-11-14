@@ -102,10 +102,13 @@ The sidebar shows the countdown while a session is active. "Up next" = your top 
 
 ## Notes
 
-Standalone Markdown notes for anything that isn't a task (⌘3; ⌘⇧N creates one from anywhere).
-List on the left (newest edit first, search filters by content), the note on the right: rendered
-like task notes, Edit/Preview toggle, Esc leaves the editor. The first line is the title. A note
-left empty is discarded when you leave it; the trash button deletes (with confirmation).
+Standalone Markdown notes for anything that isn't a task (⌘3; ⌘⇧N creates one from anywhere),
+laid out like Notion across the whole content area: a list pane (newest edit first, search filters
+by content) and the open note as a document. The title is always editable (Enter jumps to the
+body); the body is rendered Markdown — Edit, or click the space below it, to write; Esc goes back
+to the rendered view, then out of full view. The panel button hides the list (full view). In the
+file the title is the first line (`# Title`). A note left empty is discarded when you leave it;
+the trash button deletes (with confirmation).
 
 ## Look
 
@@ -140,7 +143,7 @@ pulsing indicators (saves battery). macOS "Reduce motion" is honoured by every a
 | `src/workspace.rs` | Root view: aurora backdrop, title bar clock, sidebar, page transitions |
 | `src/tasks/` | Task model, quick-add parser, link classifier (`links.rs`), `TaskStore` entity (index + per-task folders, v1 migration) |
 | `src/pages/` | One file per page; `Page` enum drives the sidebar |
-| `src/components/` | Thin wrappers over gpui-kit (`chip`, `icon_button`, `category_tag`, `card`), icon `Assets`, `markdown_style`, `fx` (glow, gradients, ring, enter/pulse animations) |
+| `src/components/` | Thin wrappers over gpui-kit (`chip`, `icon_button`, `category_tag`, `card`), icon `Assets`, `markdown_style`/`document_style`, `fx` (glow, gradients, ring, enter/pulse animations) |
 | `bacon.toml` | `make dev` rebuild/relaunch job |
 | `scripts/` | Icon generation, `.app` bundling, install; `ui/` = window/mouse/recording helpers for checking the UI |
 

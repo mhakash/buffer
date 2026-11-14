@@ -17,9 +17,10 @@ pub struct Note {
     pub id: NoteId,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-    /// Lives in `notes/<id>.md`, never in the index.
+    /// The whole Markdown file (`notes/<id>.md`), never in the index. Its first non-empty
+    /// line is the title; see [`split`].
     #[serde(skip)]
-    pub body: String,
+    pub text: String,
 }
 
 impl Note {
@@ -27,30 +28,90 @@ impl Note {
         format!("notes/{id}.md")
     }
 
-    /// First non-empty line, Markdown markers stripped.
+    pub fn split(&self) -> Split<'_> {
+        split(&self.text)
+    }
+
+    /// Title for lists and dialogs.
     pub fn title(&self) -> String {
-        self.lines()
-            .next()
-            .unwrap_or_else(|| "New note".to_string())
+        let title = plain(self.split().title);
+        if title.is_empty() {
+            "Untitled".into()
+        } else {
+            title
+        }
     }
 
-    /// The line after the title, for the list preview.
+    /// First line of the content, for the list preview.
     pub fn snippet(&self) -> String {
-        self.lines().nth(1).unwrap_or_default()
-    }
-
-    fn lines(&self) -> impl Iterator<Item = String> + '_ {
-        self.body.lines().map(plain).filter(|l| !l.is_empty())
+        self.split()
+            .content
+            .lines()
+            .map(plain)
+            .find(|l| !l.is_empty())
+            .unwrap_or_default()
     }
 
     pub fn matches(&self, query: &str) -> bool {
-        query.is_empty() || self.body.to_lowercase().contains(&query.to_lowercase())
+        query.is_empty() || self.text.to_lowercase().contains(&query.to_lowercase())
     }
 }
 
-/// A Markdown line without its heading/list/quote/checkbox prefix.
-fn plain(line: &str) -> String {
-    let mut s = line.trim();
+/// A note's text cut into its title line and the Markdown after it.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Split<'a> {
+    /// Markdown marker in front of the title (`# `, `- `, …), kept when the title is edited.
+    pub prefix: &'a str,
+    pub title: &'a str,
+    /// Everything after the title line, leading blank lines dropped.
+    pub content: &'a str,
+}
+
+impl Split<'_> {
+    /// Byte offset of `content` in the full text (content is always a suffix).
+    pub fn content_offset(&self, text: &str) -> usize {
+        text.len() - self.content.len()
+    }
+}
+
+pub fn split(text: &str) -> Split<'_> {
+    let start = text
+        .lines()
+        .take_while(|l| l.trim().is_empty())
+        .map(|l| l.len() + 1)
+        .sum::<usize>()
+        .min(text.len());
+    let rest = &text[start..];
+    let line_end = rest.find('\n').unwrap_or(rest.len());
+    let line = &rest[..line_end];
+    let title = strip_marker(line);
+    Split {
+        prefix: &line[..line.len() - title.len()],
+        title: title.trim_end(),
+        content: rest[line_end..].trim_start_matches(['\n', '\r']),
+    }
+}
+
+/// Inverse of [`split`]. An empty title keeps a `# ` line so the content doesn't become the title.
+pub fn compose(prefix: &str, title: &str, content: &str) -> String {
+    if title.trim().is_empty() && content.trim().is_empty() {
+        return String::new();
+    }
+    let prefix = if prefix.is_empty() && title.trim().is_empty() {
+        "# "
+    } else {
+        prefix
+    };
+    let mut out = format!("{prefix}{title}");
+    if !content.is_empty() {
+        out.push_str("\n\n");
+        out.push_str(content);
+    }
+    out
+}
+
+fn strip_marker(line: &str) -> &str {
+    let mut s = line.trim_start();
     loop {
         let t = s.trim_start_matches(['#', '>', '-', '*', '+']).trim_start();
         let t = ["[ ]", "[x]", "[X]"]
@@ -59,11 +120,15 @@ fn plain(line: &str) -> String {
             .unwrap_or(t)
             .trim_start();
         if t == s {
-            break;
+            return s;
         }
         s = t;
     }
-    s.replace(['*', '`'], "")
+}
+
+/// A Markdown line as plain text: no block marker, no emphasis or code ticks.
+fn plain(line: &str) -> String {
+    strip_marker(line).trim().replace(['*', '`'], "")
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -86,7 +151,7 @@ impl NoteStore {
         let mut data: NoteData = storage::load(FILE);
         data.version = DATA_VERSION;
         for note in &mut data.notes {
-            note.body = storage::load_text(&Note::file(note.id));
+            note.text = storage::load_text(&Note::file(note.id));
         }
         Self {
             data,
@@ -114,22 +179,39 @@ impl NoteStore {
             id,
             created_at: now,
             updated_at: now,
-            body: String::new(),
+            text: String::new(),
         });
         self.commit(cx);
         id
     }
 
-    pub fn set_body(&mut self, id: NoteId, body: &str, cx: &mut Context<Self>) {
-        if let Some(note) = self.note_mut(id)
-            && note.body != body
-        {
-            note.body = body.to_string();
-            self.commit_body(id, cx);
-        }
+    pub fn set_title(&mut self, id: NoteId, title: &str, cx: &mut Context<Self>) {
+        let title = title.replace('\n', " ");
+        self.edit(
+            id,
+            |text| {
+                let parts = split(text);
+                // New notes start with a heading.
+                let prefix = if text.is_empty() { "# " } else { parts.prefix };
+                compose(prefix, &title, parts.content)
+            },
+            cx,
+        );
     }
 
-    /// Ticks or unticks the `[ ]` / `[x]` marker at `marker` (byte range).
+    /// Replaces everything after the title line.
+    pub fn set_content(&mut self, id: NoteId, content: &str, cx: &mut Context<Self>) {
+        self.edit(
+            id,
+            |text| {
+                let parts = split(text);
+                compose(parts.prefix, parts.title, content)
+            },
+            cx,
+        );
+    }
+
+    /// Ticks or unticks the `[ ]` / `[x]` marker at `marker` (byte range in the full text).
     pub fn set_checkbox(
         &mut self,
         id: NoteId,
@@ -137,11 +219,21 @@ impl NoteStore {
         checked: bool,
         cx: &mut Context<Self>,
     ) {
-        if let Some(note) = self.note_mut(id)
-            && let Some(body) = set_checkbox(&note.body, marker, checked)
+        if let Some(text) = self
+            .note(id)
+            .and_then(|n| set_checkbox(&n.text, marker, checked))
         {
-            note.body = body;
-            self.commit_body(id, cx);
+            self.edit(id, |_| text, cx);
+        }
+    }
+
+    fn edit(&mut self, id: NoteId, f: impl FnOnce(&str) -> String, cx: &mut Context<Self>) {
+        if let Some(note) = self.note_mut(id) {
+            let text = f(&note.text);
+            if note.text != text {
+                note.text = text;
+                self.commit_text(id, cx);
+            }
         }
     }
 
@@ -157,14 +249,14 @@ impl NoteStore {
         self.data.notes.iter_mut().find(|n| n.id == id)
     }
 
-    /// Saves the body and the index (its `updated_at` changed; the index is tiny).
-    fn commit_body(&mut self, id: NoteId, cx: &mut Context<Self>) {
+    /// Saves the file and the index (its `updated_at` changed; the index is tiny).
+    fn commit_text(&mut self, id: NoteId, cx: &mut Context<Self>) {
         let Some(note) = self.note_mut(id) else {
             return;
         };
         note.updated_at = Utc::now();
-        let body = note.body.clone();
-        self.save_error = storage::save_text(&Note::file(id), &body)
+        let text = note.text.clone();
+        self.save_error = storage::save_text(&Note::file(id), &text)
             .err()
             .map(|err| format!("Couldn't save note: {err:#}").into());
         self.commit(cx);
@@ -182,12 +274,12 @@ impl NoteStore {
 mod tests {
     use super::*;
 
-    fn note(body: &str) -> Note {
+    fn note(text: &str) -> Note {
         Note {
             id: 1,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-            body: body.into(),
+            text: text.into(),
         }
     }
 
@@ -196,8 +288,29 @@ mod tests {
         let n = note("\n# Standup **notes**\n\n- [ ] ping `SRE`\n");
         assert_eq!(n.title(), "Standup notes");
         assert_eq!(n.snippet(), "ping SRE");
-        assert_eq!(note("").title(), "New note");
+        assert_eq!(note("").title(), "Untitled");
         assert_eq!(note("> - quoted").title(), "quoted");
+    }
+
+    #[test]
+    fn split_and_compose_round_trip() {
+        let text = "# Plan\n\n- one\n- two\n";
+        let parts = split(text);
+        assert_eq!(
+            parts,
+            Split {
+                prefix: "# ",
+                title: "Plan",
+                content: "- one\n- two\n"
+            }
+        );
+        assert_eq!(&text[parts.content_offset(text)..], parts.content);
+        assert_eq!(compose(parts.prefix, parts.title, parts.content), text);
+        // A plain first line stays plain.
+        assert_eq!(compose("", "Ideas", "x"), "Ideas\n\nx");
+        assert_eq!(compose("", "", "x"), "# \n\nx");
+        assert_eq!(split("# \n\nx").content, "x");
+        assert_eq!(compose("# ", "", ""), "");
     }
 
     #[test]
