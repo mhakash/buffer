@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use gpui_kit::component::{WindowExt, button::ButtonVariant};
+use gpui_kit::component::{WindowExt, button::ButtonVariant, dialog::DialogEntrance};
 use gpui_kit::{App, SharedString, Window, px};
 
 /// Opens a centered confirm dialog; `on_confirm` runs only if the user clicks Delete.
@@ -20,6 +20,8 @@ pub fn confirm_delete(
         let on_confirm = on_confirm.clone();
         dialog
             .centered()
+            // Fade in and settle a few px; the default slides in from the window top.
+            .entrance(DialogEntrance::FadeSlide)
             .width(px(420.))
             .title(title.clone())
             .description(description.clone())

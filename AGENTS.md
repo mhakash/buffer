@@ -44,7 +44,7 @@ components/    thin fn wrappers over kit components + icon Assets; fx.rs = glow/
 - **Components**: use kit ones (`Button`, `Checkbox`, `Input`, `TabBar`, `Tag`, `Sidebar`, `Icon`, `h_flex`/`v_flex`, tooltips…) before hand-rolling. Kit source: `~/.cargo/registry/src/*/gpui-component-0.9.1/src`.
 - **Theme**: colors via `cx.theme()` (`gpui_kit::component::ActiveTheme`); our mapping: `group_box` = card/surface (translucent so the aurora shows), `secondary` = row hover, `secondary_active` = selected, `primary` = accent, `muted_foreground` = secondary text, `chart_1`–`chart_5` = brand gradient/glow/stat accents (`fx::brand_gradient`, `fx::wash`). Change the palette in `themes/workdesk.json`, not in code. No hard-coded colors in views except data-driven ones (priority/category hex in `tasks/model.rs`). Don't mark our themes `is_default` (breaks hot reload).
 - **Style**: translucent surfaces with a hairline `theme.border`; no drop shadows, only colored glows via `fx::glow` (kit `"shadow": false`); `rounded_2xl` cards, `rounded_xl` rows, pill (`ButtonRounded::Size(px(999.))`) buttons/chips.
-- **Deletes**: never delete on one click — call `components::confirm::confirm_delete` (kit `AlertDialog` via `WindowExt::open_alert_dialog`; user rejected inline "Delete?" pills).
+- **Deletes**: never delete on one click — call `components::confirm::confirm_delete` (kit `AlertDialog` via `WindowExt::open_alert_dialog`; user rejected inline "Delete?" pills). Dialog dim = Workspace's fading `dialog-scrim`; theme `overlay` stays transparent because the kit backdrop can't fade. Kit motion is tuned in `theme::tune_motion`.
 - **Motion**: use `components::fx` (`enter` stagger, `ring`/`progress_bar` springs, `pulse`). No decorative looping motion on icons (user rejected bobbing icons as slop); repeating animations must be gated on `prefs::get(cx).ambient` and set `with_max_fps` — each one redraws the whole window. `with_animation` state is keyed by element id: an id that disappears for a frame replays on return (used for page/row entrances).
 - **Icons**: `Icon::new(gpui_kit::assets::IconName::X).text_color(c)` — never text glyphs. Kit embeds ~100 component icons; any other Lucide icon must be added to `icon_assets!` in `components/assets.rs` (+ the test list) or it renders blank.
 - **Text entry**: `Entity<InputState>` (`InputState::new(window, cx).placeholder(..)`) rendered with `Input::new(&state)`. `cx.subscribe_in(&state, window, …)` for `InputEvent::PressEnter`; `value()`, `set_value(text, window, cx)`. Esc propagates as `component::input::Escape` — handle with `.on_action` on a parent.
@@ -81,11 +81,21 @@ API source of truth: `~/.cargo/registry/src/*/{gpui-pre-0.3.12,gpui-base-0.9.1,g
 
 ## Verifying UI
 
-- Screenshots (`screencapture`) fail: no screen-recording permission, and the window exposes no AX tree. Ask the user to eyeball visual changes.
-- Quick check without bundling: run `WORKDESK_DATA_DIR=/tmp/wd ./target/debug/workdesk` as a background shell (block 0), then use the frontmost-guarded keystrokes below.
-- Keystroke automation via `osascript`/System Events works but types into **whatever app is frontmost** — the user is often working. Only send keys after asserting the frontmost process is `workdesk`; abort otherwise. Prefer AX actions that don't need focus (e.g. clicking the window close button by subrole `AXCloseButton`).
-- Launch for tests with `open --env WORKDESK_DATA_DIR=/tmp/wd --stderr /tmp/wd.log target/release/Workdesk.app` (a backgrounded binary from the agent shell is killed when the command ends). Check results by reading `/tmp/wd/tasks.json`.
-- Quit with `osascript -e 'tell application id "com.workdesk.desktop" to quit'`. Clean up `/tmp/wd*` after.
+Screen recording + Accessibility are granted to the host app, so verify visual changes yourself. Helpers in `scripts/ui/` (compile once: `swiftc -O scripts/ui/X.swift -o <scratch>/X`):
+
+| Tool | Use |
+|---|---|
+| `list` | on-screen windows front→back: owner, PID, window id, bounds |
+| `top X Y` | owner of the topmost window at a point — check before **every** click |
+| `move PID X Y` | move that app's window (AX) |
+| `mouse move\|click X Y` | post mouse events (global points) |
+| `frames IN.mov DIR t…` / `sheet OUT.png COLS imgs…` | pull frames from a recording / contact sheet |
+
+1. Launch: `(WORKDESK_DATA_DIR=<scratch>/wd perl -e 'alarm 600; exec @ARGV' ./target/debug/workdesk &)` — the alarm guarantees it quits.
+2. The user's installed Workdesk opens at the **same position**; `move` the test window clear of it (activation alone won't raise an unbundled binary) and confirm with `top` before clicking — never click into the real app. Restore any window you moved.
+3. Click the title bar to activate (hover states need an active window), then drive with `mouse`.
+4. Stills: `screencapture -x -o -l<window id> out.png` (works while occluded). Animations: `screencapture -x -v -V 3 -R x,y,w,h rec.mov` in the background, act, then `frames` + `sheet` (stills are too slow to catch <300 ms motion).
+5. `osascript` has no assistive access: use it only to read the frontmost process. Kill the test app and clean up afterwards.
 
 ## Don't
 

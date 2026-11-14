@@ -121,7 +121,7 @@ pulsing indicators (saves battery). macOS "Reduce motion" is honoured by every a
 | `src/pages/` | One file per page; `Page` enum drives the sidebar |
 | `src/components/` | Thin wrappers over gpui-kit (`chip`, `icon_button`, `category_tag`, `card`), icon `Assets`, `fx` (glow, gradients, ring, enter/pulse animations) |
 | `bacon.toml` | `make dev` rebuild/relaunch job |
-| `scripts/` | Icon generation, `.app` bundling, install |
+| `scripts/` | Icon generation, `.app` bundling, install; `ui/` = window/mouse/recording helpers for checking the UI |
 
 ## Add a page
 

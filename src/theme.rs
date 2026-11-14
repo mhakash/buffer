@@ -54,6 +54,7 @@ pub fn init(cx: &mut App) {
     }
     select_workdesk_themes(cx);
     Theme::change(prefs::get(cx).appearance.mode(), None, cx);
+    tune_motion(cx);
 
     #[cfg(debug_assertions)]
     {
@@ -61,6 +62,7 @@ pub fn init(cx: &mut App) {
         let watched = ThemeRegistry::watch_dir(dir, cx, |cx| {
             select_workdesk_themes(cx);
             Theme::change(Appearance::current(cx).mode(), None, cx);
+            tune_motion(cx);
         });
         if let Err(err) = watched {
             eprintln!("theme hot reload disabled: {err:#}");
@@ -81,8 +83,16 @@ fn select_workdesk_themes(cx: &mut App) {
     }
 }
 
+/// Slightly slower, longer-travel kit motion (dialogs, popovers) so reveals read as calm.
+fn tune_motion(cx: &mut App) {
+    let motion = &mut Theme::global_mut(cx).motion;
+    motion.duration_normal = std::time::Duration::from_millis(240);
+    motion.distance_short = gpui_kit::rems(0.5);
+}
+
 pub fn set(appearance: Appearance, cx: &mut App) {
     Theme::change(appearance.mode(), None, cx);
+    tune_motion(cx);
     prefs::update(cx, |p| p.appearance = appearance);
 }
 

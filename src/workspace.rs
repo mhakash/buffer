@@ -3,10 +3,10 @@
 use std::time::Duration;
 
 use chrono::Local;
-use gpui_kit::component::{ActiveTheme, Icon, Sizable, Theme, TitleBar, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme, Icon, Sizable, Theme, TitleBar, WindowExt, h_flex, v_flex};
 use gpui_kit::{
     AnimationExt, AnyView, Context, Entity, FocusHandle, FontWeight, SharedString, SpringAnimation,
-    Subscription, Task, Window, assets::IconName, div, prelude::*, px,
+    SpringConfig, Subscription, Task, Window, assets::IconName, div, prelude::*, px,
 };
 
 use crate::{
@@ -25,6 +25,8 @@ use crate::{
 
 const NAV_ITEM_H: f32 = 40.;
 const NAV_GAP: f32 = 4.;
+/// Critically damped (no overshoot), ~250 ms: the dim behind dialogs fades in and out.
+const SCRIM_SPRING: SpringConfig = SpringConfig::new(300., 34.6, 1.);
 
 pub struct Workspace {
     focus_handle: FocusHandle,
@@ -409,6 +411,7 @@ impl Render for Workspace {
         let theme = cx.theme().clone();
         let ambient = prefs::get(cx).ambient;
         let page_id = self.active as u64;
+        let dialog_open = window.has_active_dialog(cx);
         // Hide the panel on Settings, and drop it if its task was deleted.
         let open = self.detail.read(cx).task_id();
         if open.is_some_and(|id| self.store.read(cx).task(id).is_none()) {
@@ -506,6 +509,23 @@ impl Render for Workspace {
                                         .child(self.detail.clone()),
                                 )
                             }),
+                    ),
+            )
+            // Our own dim layer under kit dialogs: the kit's backdrop can't fade (it paints in a
+            // deferred pass), so theme `overlay` is transparent and this fades instead.
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .bg(if theme.is_dark() {
+                        theme.background.opacity(0.72)
+                    } else {
+                        theme.foreground.opacity(0.28)
+                    })
+                    .with_spring(
+                        "dialog-scrim",
+                        SpringAnimation::new(SCRIM_SPRING).to(if dialog_open { 1. } else { 0. }),
+                        |el, v| el.opacity(v.clamp(0., 1.)),
                     ),
             )
     }
