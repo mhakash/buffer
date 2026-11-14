@@ -14,7 +14,7 @@ use gpui_kit::component::{
     h_flex,
     input::{Escape, Input, InputEvent, InputState, Textarea, TextareaState},
     menu::{DropdownMenu, PopupMenuItem},
-    text::TextView,
+    text::{TextView, TextViewStyle},
     v_flex,
 };
 use gpui_kit::{
@@ -545,10 +545,10 @@ impl TaskDetail {
             let store = self.store.clone();
             div()
                 .id("notes-preview")
-                .px_1()
                 .text_sm()
                 .child(
                     TextView::markdown(("notes-md", id), task.notes.clone())
+                        .style(notes_style())
                         .selectable(true)
                         .on_task_toggle(move |event, _, cx| {
                             store.update(cx, |s, cx| {
@@ -560,7 +560,7 @@ impl TaskDetail {
         };
 
         Self::section(IconName::NotebookPen, "Notes", None, theme)
-            .child(h_flex().absolute().top(px(-6.)).right_0().child(toggle))
+            .child(h_flex().absolute().top(px(-1.)).right_0().child(toggle))
             .relative()
             .child(body)
             .into_any_element()
@@ -940,4 +940,17 @@ fn when(ts: DateTime<Utc>) -> String {
         1 => local.format("yesterday %H:%M").to_string(),
         _ => local.format("%b %-d, %H:%M").to_string(),
     }
+}
+
+/// Notes sit in a narrow panel under small section labels: keep headings close to the
+/// body size (hierarchy from weight) and paragraphs tight.
+fn notes_style() -> TextViewStyle {
+    TextViewStyle::default()
+        .paragraph_gap(gpui_kit::rems(0.5))
+        .heading_font_size(|level, _| match level {
+            1 => px(18.),
+            2 => px(16.),
+            3 => px(15.),
+            _ => px(14.),
+        })
 }
