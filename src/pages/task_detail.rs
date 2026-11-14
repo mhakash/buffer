@@ -524,9 +524,10 @@ impl TaskDetail {
                 .child(Textarea::new(&self.notes).appearance(false))
                 .into_any_element()
         } else if task.notes.trim().is_empty() {
-            h_flex()
+            // Block, not a flex row: plain text in a flex row doesn't wrap and overflows.
+            div()
                 .id("notes-empty")
-                .gap_2()
+                .w_full()
                 .px_3()
                 .py_3()
                 .rounded_xl()
