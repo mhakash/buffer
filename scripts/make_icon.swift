@@ -22,9 +22,10 @@ shadow.shadowBlurRadius = 24
 shadow.set()
 
 let squircle = NSBezierPath(roundedRect: body, xRadius: 185, yRadius: 185)
+// Brand gradient: theme chart.1 (#8b5cf6) → chart.3 (#f472b6); matches the sidebar mark.
 NSGradient(colors: [
-    NSColor(srgbRed: 0.31, green: 0.55, blue: 1.0, alpha: 1),
-    NSColor(srgbRed: 0.45, green: 0.30, blue: 0.95, alpha: 1),
+    NSColor(srgbRed: 0x8b / 255, green: 0x5c / 255, blue: 0xf6 / 255, alpha: 1),
+    NSColor(srgbRed: 0xf4 / 255, green: 0x72 / 255, blue: 0xb6 / 255, alpha: 1),
 ])!.draw(in: squircle, angle: -60)
 NSShadow().set()
 
