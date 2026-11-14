@@ -14,7 +14,7 @@ use gpui_kit::component::{
     h_flex,
     input::{Escape, Input, InputEvent, InputState, Textarea, TextareaState},
     menu::{DropdownMenu, PopupMenuItem},
-    text::{TextView, TextViewStyle},
+    text::TextView,
     v_flex,
 };
 use gpui_kit::{
@@ -24,7 +24,7 @@ use gpui_kit::{
 
 use super::tasks::due_label;
 use crate::{
-    components::{category_tag, confirm::confirm_delete, fx, icon_button},
+    components::{category_tag, confirm::confirm_delete, fx, icon_button, markdown_style},
     tasks::{Id, LinkKind, Task, TaskStore, classify, is_url},
 };
 
@@ -548,7 +548,7 @@ impl TaskDetail {
                 .text_sm()
                 .child(
                     TextView::markdown(("notes-md", id), task.notes.clone())
-                        .style(notes_style())
+                        .style(markdown_style())
                         .selectable(true)
                         .on_task_toggle(move |event, _, cx| {
                             store.update(cx, |s, cx| {
@@ -931,8 +931,8 @@ impl Render for TaskDetail {
     }
 }
 
-/// `14:05`, `Yesterday 14:05`, `Nov 3, 14:05`.
-fn when(ts: DateTime<Utc>) -> String {
+/// `today 14:05`, `yesterday 14:05`, `Nov 3, 14:05`.
+pub fn when(ts: DateTime<Utc>) -> String {
     let local = ts.with_timezone(&Local);
     let today = Local::now().date_naive();
     match (today - local.date_naive()).num_days() {
@@ -940,17 +940,4 @@ fn when(ts: DateTime<Utc>) -> String {
         1 => local.format("yesterday %H:%M").to_string(),
         _ => local.format("%b %-d, %H:%M").to_string(),
     }
-}
-
-/// Notes sit in a narrow panel under small section labels: keep headings close to the
-/// body size (hierarchy from weight) and paragraphs tight.
-fn notes_style() -> TextViewStyle {
-    TextViewStyle::default()
-        .paragraph_gap(gpui_kit::rems(0.5))
-        .heading_font_size(|level, _| match level {
-            1 => px(18.),
-            2 => px(16.),
-            3 => px(15.),
-            _ => px(14.),
-        })
 }

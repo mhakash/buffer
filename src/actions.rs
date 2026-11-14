@@ -13,6 +13,8 @@ actions!(
         NewTask,
         ShowTasks,
         ShowFocus,
+        ShowNotes,
+        NewNote,
         ShowSettings,
         ToggleTimer,
     ]
@@ -26,6 +28,8 @@ pub fn init(cx: &mut App) {
         bind("secondary-n", NewTask, cx),
         bind("secondary-1", ShowTasks, cx),
         bind("secondary-2", ShowFocus, cx),
+        bind("secondary-3", ShowNotes, cx),
+        bind("secondary-shift-n", NewNote, cx),
         bind("secondary-shift-f", ToggleTimer, cx),
         bind("secondary-,", ShowSettings, cx),
     ];
@@ -44,6 +48,7 @@ pub fn init(cx: &mut App) {
         ]),
         Menu::new("File").items([
             MenuItem::action("New Task", NewTask),
+            MenuItem::action("New Note", NewNote),
             MenuItem::action("Start/Pause Focus Timer", ToggleTimer),
             MenuItem::separator(),
             MenuItem::action("Close Window", CloseWindow),
@@ -51,6 +56,7 @@ pub fn init(cx: &mut App) {
         Menu::new("View").items([
             MenuItem::action("Tasks", ShowTasks),
             MenuItem::action("Focus", ShowFocus),
+            MenuItem::action("Notes", ShowNotes),
             MenuItem::action("Settings", ShowSettings),
             MenuItem::separator(),
             MenuItem::action("Toggle Light/Dark", ToggleTheme),

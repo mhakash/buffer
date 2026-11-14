@@ -1,4 +1,5 @@
 mod focus;
+mod notes;
 mod settings;
 mod task_detail;
 mod tasks;
@@ -6,6 +7,7 @@ mod tasks;
 use gpui_kit::assets::IconName;
 
 pub use focus::FocusPage;
+pub use notes::NotesPage;
 pub use settings::SettingsPage;
 pub use task_detail::{
     DetailEvent, OpenTask, PANEL_DEFAULT_W, PANEL_MIN_W, ResizePanel, TaskDetail,
@@ -17,16 +19,18 @@ pub use tasks::TasksPage;
 pub enum Page {
     Tasks,
     Focus,
+    Notes,
     Settings,
 }
 
 impl Page {
-    pub const ALL: [Page; 3] = [Page::Tasks, Page::Focus, Page::Settings];
+    pub const ALL: [Page; 4] = [Page::Tasks, Page::Focus, Page::Notes, Page::Settings];
 
     pub fn label(self) -> &'static str {
         match self {
             Page::Tasks => "Tasks",
             Page::Focus => "Focus",
+            Page::Notes => "Notes",
             Page::Settings => "Settings",
         }
     }
@@ -35,14 +39,21 @@ impl Page {
         match self {
             Page::Tasks => IconName::ListTodo,
             Page::Focus => IconName::Timer,
+            Page::Notes => IconName::StickyNote,
             Page::Settings => IconName::Settings,
         }
+    }
+
+    /// The task detail panel can sit beside this page.
+    pub fn shows_task_detail(self) -> bool {
+        matches!(self, Page::Tasks | Page::Focus)
     }
 
     pub fn shortcut(self) -> &'static str {
         match self {
             Page::Tasks => "⌘1",
             Page::Focus => "⌘2",
+            Page::Notes => "⌘3",
             Page::Settings => "⌘,",
         }
     }

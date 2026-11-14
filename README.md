@@ -3,7 +3,8 @@
 Desktop app for custom work tooling, built on [GPUI](https://gpui.rs/) (Zed's UI framework) via
 [GPUI Kit](https://gpui-kit.com) (GPUI + ready-made components, Lucide icons, JSON themes).
 Aurora-styled UI (drifting glow, springy nav, animated progress) with a task list, a daily
-dashboard (greeting, streak, 7-day chart, progress ring) and a pomodoro Focus timer.
+dashboard (greeting, streak, 7-day chart, progress ring), standalone Markdown notes and a pomodoro
+Focus timer.
 
 ## Install / update
 
@@ -43,6 +44,8 @@ Bump `version` in `Cargo.toml` with each feature; it shows in the status bar and
 | `tasks.json` | Index: task titles, priority, order, categories, dates + the category list |
 | `tasks/<id>/task.json` | That task's subtasks, links, work log |
 | `tasks/<id>/notes.md` | That task's notes (plain Markdown; edit it in any editor while the app is closed) |
+| `notes.json` | Notes index: ids, created/edited times |
+| `notes/<id>.md` | One standalone note (plain Markdown) |
 | `settings.json` | Theme, your name (greeting), ambient motion on/off. |
 | `focus.json` | Focus length + log of finished focus sessions. |
 
@@ -97,6 +100,13 @@ Pomodoro timer: pick 15/25/45/60 min, Start (⌘⇧F from anywhere). Finished fo
 logged and followed by a 5-min break (15 min every 4th). A chime plays at the end of each phase.
 The sidebar shows the countdown while a session is active. "Up next" = your top open task.
 
+## Notes
+
+Standalone Markdown notes for anything that isn't a task (⌘3; ⌘⇧N creates one from anywhere).
+List on the left (newest edit first, search filters by content), the note on the right: rendered
+like task notes, Edit/Preview toggle, Esc leaves the editor. The first line is the title. A note
+left empty is discarded when you leave it; the trash button deletes (with confirmation).
+
 ## Look
 
 Palette lives in `themes/workdesk.json`; `chart.1`–`chart.5` drive the brand gradient, glows and
@@ -107,8 +117,8 @@ pulsing indicators (saves battery). macOS "Reduce motion" is honoured by every a
 
 | Keys | Action |
 |---|---|
-| ⌘N | New task (focus composer) |
-| ⌘1 / ⌘2 / ⌘, | Tasks / Focus / Settings |
+| ⌘N / ⌘⇧N | New task (focus composer) / new note |
+| ⌘1 / ⌘2 / ⌘3 / ⌘, | Tasks / Focus / Notes / Settings |
 | ⌘⇧F | Start/pause focus timer |
 | Enter / Esc | Add or save / cancel edit |
 | ⌘⇧T | Toggle light/dark |
@@ -124,12 +134,13 @@ pulsing indicators (saves battery). macOS "Reduce motion" is honoured by every a
 | `src/prefs.rs` | `settings.json` (appearance, name, ambient) as a global |
 | `src/theme.rs` | Light/dark appearance over gpui-kit's `Theme`; loads `themes/` |
 | `src/focus/` | `FocusTimer` entity (pomodoro state, `focus.json`) |
+| `src/notes/` | `NoteStore` entity (`notes.json` + `notes/<id>.md`) |
 | `src/quotes.rs` | Daily sidebar line + time-of-day greeting |
 | `themes/workdesk.json` | Light + dark palettes (hot-reloaded in debug builds) |
 | `src/workspace.rs` | Root view: aurora backdrop, title bar clock, sidebar, page transitions |
 | `src/tasks/` | Task model, quick-add parser, link classifier (`links.rs`), `TaskStore` entity (index + per-task folders, v1 migration) |
 | `src/pages/` | One file per page; `Page` enum drives the sidebar |
-| `src/components/` | Thin wrappers over gpui-kit (`chip`, `icon_button`, `category_tag`, `card`), icon `Assets`, `fx` (glow, gradients, ring, enter/pulse animations) |
+| `src/components/` | Thin wrappers over gpui-kit (`chip`, `icon_button`, `category_tag`, `card`), icon `Assets`, `markdown_style`, `fx` (glow, gradients, ring, enter/pulse animations) |
 | `bacon.toml` | `make dev` rebuild/relaunch job |
 | `scripts/` | Icon generation, `.app` bundling, install; `ui/` = window/mouse/recording helpers for checking the UI |
 

@@ -35,6 +35,7 @@ workspace.rs   root view: aurora | TitleBar | custom sidebar | active page; owns
 tasks/         model.rs (Task + Subtask/Link/LogEntry, parse_quick_add, streak stats) · links.rs (URL → Jira/MR/… label) · store.rs (TaskStore entity)
 pages/task_detail.rs  side panel / full page (`full_page`); Workspace sizes it (`prefs.detail_width`, `ResizePanel` drag)
 focus/         FocusTimer entity (pomodoro, focus.json)
+notes/         NoteStore entity (notes.json index + notes/<id>.md); pages/notes.rs = list + editor
 pages/         one Render view per sidebar page; Page enum lists them. task_detail.rs = right panel owned by Workspace; pages `cx.emit(OpenTask(id))`, Workspace subscribes and opens it
 components/    thin fn wrappers over kit components + icon Assets; fx.rs = glow/gradient/ring/animations
 ```

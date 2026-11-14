@@ -1,6 +1,7 @@
 mod actions;
 mod components;
 mod focus;
+mod notes;
 mod pages;
 mod prefs;
 mod quotes;

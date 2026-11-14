@@ -12,15 +12,17 @@ use gpui_kit::{
 
 use crate::{
     APP_NAME,
-    actions::{CloseWindow, NewTask, ShowFocus, ShowSettings, ShowTasks, ToggleTimer},
+    actions::{
+        CloseWindow, NewNote, NewTask, ShowFocus, ShowNotes, ShowSettings, ShowTasks, ToggleTimer,
+    },
     components::{
         fx::{self, SPRING},
         icon_button,
     },
     focus::FocusTimer,
     pages::{
-        DetailEvent, FocusPage, OpenTask, PANEL_MIN_W, Page, ResizePanel, SettingsPage, TaskDetail,
-        TasksPage,
+        DetailEvent, FocusPage, NotesPage, OpenTask, PANEL_MIN_W, Page, ResizePanel, SettingsPage,
+        TaskDetail, TasksPage,
     },
     prefs, quotes,
     tasks::{TaskStore, completions_by_day, streak},
@@ -44,6 +46,7 @@ pub struct Workspace {
     timer: Entity<FocusTimer>,
     tasks: Entity<TasksPage>,
     focus: Entity<FocusPage>,
+    notes: Entity<NotesPage>,
     settings: Entity<SettingsPage>,
     detail: Entity<TaskDetail>,
     _clock: Task<()>,
@@ -56,6 +59,7 @@ impl Workspace {
         let timer = cx.new(FocusTimer::load);
         let tasks = cx.new(|cx| TasksPage::new(store.clone(), window, cx));
         let focus = cx.new(|cx| FocusPage::new(timer.clone(), store.clone(), cx));
+        let notes = cx.new(|cx| NotesPage::new(window, cx));
         let settings = cx.new(|cx| SettingsPage::new(store.clone(), window, cx));
         let detail = cx.new(|cx| TaskDetail::new(store.clone(), window, cx));
 
@@ -100,13 +104,14 @@ impl Workspace {
             timer,
             tasks,
             focus,
+            notes,
             settings,
             detail,
         }
     }
 
     fn open_task(&mut self, id: crate::tasks::Id, window: &mut Window, cx: &mut Context<Self>) {
-        if self.active == Page::Settings {
+        if !self.active.shows_task_detail() {
             self.navigate(Page::Tasks, window, cx);
         }
         self.detail.update(cx, |d, cx| d.open(id, window, cx));
@@ -127,6 +132,7 @@ impl Workspace {
             Page::Tasks => self
                 .tasks
                 .update(cx, |tasks, cx| tasks.focus_composer(window, cx)),
+            Page::Notes => self.notes.update(cx, |notes, cx| notes.focus(window, cx)),
             Page::Focus | Page::Settings => self.focus_handle.focus(window, cx),
         }
         cx.notify();
@@ -136,6 +142,7 @@ impl Workspace {
         match self.active {
             Page::Tasks => self.tasks.clone().into(),
             Page::Focus => self.focus.clone().into(),
+            Page::Notes => self.notes.clone().into(),
             Page::Settings => self.settings.clone().into(),
         }
     }
@@ -409,7 +416,7 @@ impl Workspace {
                     .px_1()
                     .text_xs()
                     .text_color(theme.muted_foreground)
-                    .child("⌘N new · ⌘⇧F focus")
+                    .child("⌘N task · ⌘⇧N note")
                     .child(
                         icon_button(
                             "toggle-theme",
@@ -429,12 +436,13 @@ impl Render for Workspace {
         let ambient = prefs::get(cx).ambient;
         let page_id = self.active as u64;
         let dialog_open = window.has_active_dialog(cx);
-        // Hide the panel on Settings, and drop it if its task was deleted.
+        // Hide the panel on pages without tasks, and drop it if its task was deleted.
         let open = self.detail.read(cx).task_id();
         if open.is_some_and(|id| self.store.read(cx).task(id).is_none()) {
             self.detail.update(cx, |d, cx| d.close(cx));
         }
-        let show_detail = self.active != Page::Settings && self.detail.read(cx).task_id().is_some();
+        let show_detail =
+            self.active.shows_task_detail() && self.detail.read(cx).task_id().is_some();
         let full_page = show_detail && self.detail.read(cx).is_full_page();
         let viewport_w = f32::from(window.viewport_size().width);
         let panel_w = clamp_panel_width(prefs::get(cx).detail_width, viewport_w);
@@ -467,6 +475,15 @@ impl Render for Workspace {
                     this.navigate(Page::Focus, window, cx)
                 }),
             )
+            .on_action(
+                cx.listener(|this, _: &ShowNotes, window, cx| {
+                    this.navigate(Page::Notes, window, cx)
+                }),
+            )
+            .on_action(cx.listener(|this, _: &NewNote, window, cx| {
+                this.navigate(Page::Notes, window, cx);
+                this.notes.update(cx, |notes, cx| notes.create(window, cx));
+            }))
             .on_action(cx.listener(|this, _: &ShowSettings, window, cx| {
                 this.navigate(Page::Settings, window, cx)
             }))
