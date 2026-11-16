@@ -186,7 +186,7 @@ pulsing indicators (saves battery). macOS "Reduce motion" is honoured by every a
 | Keys | Action |
 |---|---|
 | ⌘N / ⌘⇧N | New task (focus composer) / new note |
-| ⌘1 / ⌘2 / ⌘3 / ⌘, | Tasks / Focus / Notes / Settings |
+| ⌘1 / ⌘2 / ⌘3 / ⌘4 / ⌘, | Tasks / Focus / Notes / Blocks / Settings |
 | ⌘⇧F | Start/pause focus timer |
 | Enter / Esc | Add or save / cancel edit |
 | ⌘⇧T | Toggle light/dark |

@@ -60,11 +60,11 @@ pub fn markdown_view(
     style: TextViewStyle,
     dir: PathBuf,
 ) -> TextView {
-    base_view(id, text, style, dir.clone()).plugin(BlockPlugin { dir })
+    output_view(id, text, style, dir.clone()).plugin(BlockPlugin { dir })
 }
 
 /// Everything but programmatic blocks: a block's own output can't run more blocks.
-fn base_view(
+pub fn output_view(
     id: impl Into<ElementId>,
     text: impl Into<SharedString>,
     style: TextViewStyle,
@@ -601,7 +601,7 @@ impl MarkdownPlugin for BlockPlugin {
             (None, false) => "Not run yet".to_string(),
         };
         let icon = Icon::empty()
-            .path(blocks::icon_path(&ty, cx))
+            .path(blocks::icon_path(&ty.icon, cx))
             .small()
             .text_color(theme.muted_foreground);
         let ambient = crate::prefs::get(cx).ambient;
@@ -653,7 +653,7 @@ impl MarkdownPlugin for BlockPlugin {
 
         let body = status.output.as_ref().and_then(|out| {
             (!out.markdown.trim().is_empty()).then(|| {
-                base_view(
+                output_view(
                     ("block-out", id),
                     out.markdown.clone(),
                     markdown_style(),

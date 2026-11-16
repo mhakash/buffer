@@ -18,8 +18,8 @@ use gpui_kit::{
 use crate::{
     APP_NAME,
     actions::{
-        CloseWindow, NewNote, NewTask, NewWorkspace, ShowFocus, ShowNotes, ShowSettings, ShowTasks,
-        ToggleTimer,
+        CloseWindow, NewNote, NewTask, NewWorkspace, ShowBlocks, ShowFocus, ShowNotes,
+        ShowSettings, ShowTasks, ToggleTimer,
     },
     components::{
         fx::{self, SPRING},
@@ -27,8 +27,8 @@ use crate::{
     },
     focus::FocusTimer,
     pages::{
-        DetailEvent, FocusPage, NotesPage, OpenTask, PANEL_MIN_W, Page, ResizePanel, SettingsPage,
-        TaskDetail, TasksPage,
+        BlocksPage, DetailEvent, FocusPage, NotesPage, OpenTask, PANEL_MIN_W, Page, ResizePanel,
+        SettingsPage, TaskDetail, TasksPage,
     },
     prefs, quotes,
     tasks::{TaskStore, completions_by_day, streak},
@@ -54,6 +54,7 @@ pub struct Workspace {
     tasks: Entity<TasksPage>,
     focus: Entity<FocusPage>,
     notes: Entity<NotesPage>,
+    blocks: Entity<BlocksPage>,
     settings: Entity<SettingsPage>,
     detail: Entity<TaskDetail>,
     /// Root of the workspace the stores were loaded from.
@@ -70,6 +71,7 @@ struct Content {
     tasks: Entity<TasksPage>,
     focus: Entity<FocusPage>,
     notes: Entity<NotesPage>,
+    blocks: Entity<BlocksPage>,
     settings: Entity<SettingsPage>,
     detail: Entity<TaskDetail>,
     subscriptions: Vec<Subscription>,
@@ -83,6 +85,7 @@ impl Content {
         let tasks = cx.new(|cx| TasksPage::new(store.clone(), window, cx));
         let focus = cx.new(|cx| FocusPage::new(timer.clone(), store.clone(), cx));
         let notes = cx.new(|cx| NotesPage::new(store.clone(), window, cx));
+        let blocks = cx.new(|cx| BlocksPage::new(window, cx));
         let settings = cx.new(|cx| SettingsPage::new(store.clone(), window, cx));
         let detail = cx.new(|cx| TaskDetail::new(store.clone(), window, cx));
         let subscriptions = vec![
@@ -108,6 +111,7 @@ impl Content {
             tasks,
             focus,
             notes,
+            blocks,
             settings,
             detail,
             subscriptions,
@@ -150,6 +154,7 @@ impl Workspace {
             tasks: content.tasks,
             focus: content.focus,
             notes: content.notes,
+            blocks: content.blocks,
             settings: content.settings,
             detail: content.detail,
             _clock: clock,
@@ -164,6 +169,7 @@ impl Workspace {
         self.tasks = content.tasks;
         self.focus = content.focus;
         self.notes = content.notes;
+        self.blocks = content.blocks;
         self.settings = content.settings;
         self.detail = content.detail;
         self._subscriptions = content.subscriptions;
@@ -199,6 +205,9 @@ impl Workspace {
                 .tasks
                 .update(cx, |tasks, cx| tasks.focus_composer(window, cx)),
             Page::Notes => self.notes.update(cx, |notes, cx| notes.focus(window, cx)),
+            Page::Blocks => self
+                .blocks
+                .update(cx, |blocks, cx| blocks.focus(window, cx)),
             Page::Focus | Page::Settings => self.focus_handle.focus(window, cx),
         }
         cx.notify();
@@ -209,6 +218,7 @@ impl Workspace {
             Page::Tasks => self.tasks.clone().into(),
             Page::Focus => self.focus.clone().into(),
             Page::Notes => self.notes.clone().into(),
+            Page::Blocks => self.blocks.clone().into(),
             Page::Settings => self.settings.clone().into(),
         }
     }
@@ -561,7 +571,7 @@ impl Render for Workspace {
         let show_detail =
             self.active.shows_task_detail() && self.detail.read(cx).task_id().is_some();
         let full_page = show_detail && self.detail.read(cx).is_full_page();
-        let notes_page = self.active == Page::Notes;
+        let own_panes = self.active.owns_panes();
         let viewport_w = f32::from(window.viewport_size().width);
         let panel_w = clamp_panel_width(prefs::get(cx).detail_width, viewport_w);
         // Dock the panel beside the page only if the page keeps room to breathe.
@@ -599,6 +609,9 @@ impl Render for Workspace {
                     this.navigate(Page::Notes, window, cx)
                 }),
             )
+            .on_action(cx.listener(|this, _: &ShowBlocks, window, cx| {
+                this.navigate(Page::Blocks, window, cx)
+            }))
             .on_action(cx.listener(|this, _: &NewNote, window, cx| {
                 this.navigate(Page::Notes, window, cx);
                 this.notes.update(cx, |notes, cx| notes.create(window, cx));
@@ -648,15 +661,15 @@ impl Render for Workspace {
                             .flex_1()
                             .min_h_0()
                             .child(self.render_sidebar(&theme, cx))
-                            // Notes manages its own panes and scrolling across the whole area.
-                            .when(notes_page, |this| {
+                            // Notes and Blocks manage their own panes and scrolling.
+                            .when(own_panes, |this| {
                                 this.child(div().flex_1().min_w_0().mr_3().mb_3().child(fx::enter(
-                                    div().size_full().child(self.notes.clone()),
+                                    div().size_full().child(self.active_view()),
                                     ("page", page_id),
                                     0,
                                 )))
                             })
-                            .when(!full_page && !notes_page, |this| {
+                            .when(!full_page && !own_panes, |this| {
                                 this.child(
                                     div()
                                         .id("content")

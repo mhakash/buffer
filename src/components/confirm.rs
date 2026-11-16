@@ -13,6 +13,18 @@ pub fn confirm_delete(
     description: impl Into<SharedString>,
     on_confirm: impl Fn(&mut Window, &mut App) + 'static,
 ) {
+    confirm(window, cx, title, description, "Delete", on_confirm);
+}
+
+/// [`confirm_delete`] with another (still destructive) action, e.g. "Discard".
+pub fn confirm(
+    window: &mut Window,
+    cx: &mut App,
+    title: impl Into<SharedString>,
+    description: impl Into<SharedString>,
+    ok: &'static str,
+    on_confirm: impl Fn(&mut Window, &mut App) + 'static,
+) {
     let title = title.into();
     let description = description.into();
     let on_confirm = Rc::new(on_confirm);
@@ -27,7 +39,7 @@ pub fn confirm_delete(
             .description(description.clone())
             .show_cancel(true)
             .cancel_text("Cancel")
-            .ok_text("Delete")
+            .ok_text(ok)
             .ok_variant(ButtonVariant::Danger)
             .on_ok(move |_, window, cx| {
                 on_confirm(window, cx);

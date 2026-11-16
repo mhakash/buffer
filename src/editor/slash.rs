@@ -123,7 +123,7 @@ fn slash_items(query: &str, cx: &App) -> Vec<SlashItem> {
         .filter(|t| t.name.contains(query) || t.label().to_lowercase().contains(query))
         .map(|t| SlashItem {
             label: t.label().to_string().into(),
-            icon: Icon::empty().path(blocks::icon_path(t, cx)),
+            icon: Icon::empty().path(blocks::icon_path(&t.icon, cx)),
             kind: Kind::Code(format!("{FENCE} {}", t.name)),
             text: t.starter(),
             custom: true,

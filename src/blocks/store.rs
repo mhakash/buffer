@@ -1,9 +1,6 @@
 //! Block types on disk, in the active workspace: `blocks/<name>/block.json` + its script.
 //! Cached results: `.cache/blocks/<key>.json`.
 
-// `script`, `save`, `remove`: for the Blocks page, still to come.
-#![allow(dead_code)]
-
 use super::model::{BlockType, Output, valid_name};
 use crate::storage;
 
@@ -35,6 +32,10 @@ pub fn load_all() -> Vec<BlockType> {
             ty
         })
         .collect()
+}
+
+pub fn exists(name: &str) -> bool {
+    storage::path(&folder(name)).exists()
 }
 
 pub fn script(ty: &BlockType) -> String {

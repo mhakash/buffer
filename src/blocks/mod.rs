@@ -60,6 +60,33 @@ pub fn load(cx: &mut App) {
     });
 }
 
+/// Re-reads block types after one was saved or removed; results stay (keys carry the revision).
+pub fn reload_types(cx: &mut App) {
+    cx.default_global::<Blocks>().types = store::load_all();
+    cx.refresh_windows();
+}
+
+/// Runs a block once for the Blocks page's test run: no cache, no dedup.
+pub fn run_once(ty: &BlockType, config: &Config) -> oneshot::Receiver<Output> {
+    let job = job(ty, config);
+    let (tx, rx) = oneshot::channel();
+    thread::spawn(move || {
+        let _ = tx.send(runner::run(&job));
+    });
+    rx
+}
+
+fn job(ty: &BlockType, config: &Config) -> Job {
+    Job {
+        shell: runner::login_shell(),
+        dir: storage::path(&store::folder(&ty.name)),
+        command: Job::command(&ty.interpreter, &ty.script),
+        input: ty.input(config),
+        env: ty.env.clone().into_iter().collect(),
+        timeout: Duration::from_secs(ty.timeout),
+    }
+}
+
 pub fn types(cx: &App) -> &[BlockType] {
     cx.try_global::<Blocks>()
         .map(|b| b.types.as_slice())
@@ -67,8 +94,8 @@ pub fn types(cx: &App) -> &[BlockType] {
 }
 
 /// Asset path of a block type's icon: any Lucide name (`list-checks`), else a default.
-pub fn icon_path(ty: &BlockType, cx: &App) -> SharedString {
-    let name = ty.icon.trim();
+pub fn icon_path(icon: &str, cx: &App) -> SharedString {
+    let name = icon.trim();
     let path = format!("icons/{name}.svg");
     if !name.is_empty() && matches!(cx.asset_source().load(&path), Ok(Some(_))) {
         path.into()
@@ -119,14 +146,7 @@ fn start(ty: &BlockType, config: &Config, cx: &mut App) {
     let generation = GENERATION.load(Ordering::Relaxed);
     // Paths resolved now: the workspace may switch before the run ends.
     let cache = storage::path(&store::cache_file(&key));
-    let job = Job {
-        shell: runner::login_shell(),
-        dir: storage::path(&store::folder(&ty.name)),
-        command: Job::command(&ty.interpreter, &ty.script),
-        input: ty.input(config),
-        env: ty.env.clone().into_iter().collect(),
-        timeout: Duration::from_secs(ty.timeout),
-    };
+    let job = job(ty, config);
     let previous = cx
         .default_global::<Blocks>()
         .results
