@@ -670,7 +670,7 @@ dependencies = [
 
 [[package]]
 name = "buffer"
-version = "0.20.0"
+version = "0.20.1"
 dependencies = [
  "anyhow",
  "chrono",

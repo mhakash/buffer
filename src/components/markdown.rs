@@ -646,7 +646,18 @@ impl MarkdownPlugin for BlockPlugin {
             .child(div().min_w_0().truncate().child(ty.label().to_string()))
             .child("·")
             .child(div().flex_none().child(note))
-            .when(trusted, |m| m.child(refresh));
+            .when(trusted, |m| m.child(refresh))
+            // Not a button: the click reaches the editor's row, which opens the config.
+            .child(
+                h_flex()
+                    .flex_none()
+                    .gap_1()
+                    .items_center()
+                    .cursor(CursorStyle::PointingHand)
+                    .hover(|s| s.text_color(theme.foreground))
+                    .child(Icon::new(IconName::Pencil).xsmall())
+                    .child("Edit"),
+            );
         let allow = (!trusted).then(|| {
             h_flex()
                 .gap_2()
@@ -672,13 +683,19 @@ impl MarkdownPlugin for BlockPlugin {
 
         let body = status.output.as_ref().and_then(|out| {
             (!out.markdown.trim().is_empty()).then(|| {
-                output_view(
-                    ("block-out", id),
-                    out.markdown.clone(),
-                    self.style.clone(),
-                    self.dir.clone(),
-                )
-                .into_any_element()
+                // Clicks stay here (select, copy, follow links); a note editor would otherwise
+                // open the block's config. Editing goes through the meta line.
+                div()
+                    .id(("block-body", id))
+                    .cursor(CursorStyle::IBeam)
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .child(output_view(
+                        ("block-out", id),
+                        out.markdown.clone(),
+                        self.style.clone(),
+                        self.dir.clone(),
+                    ))
+                    .into_any_element()
             })
         });
         let error = status.output.as_ref().filter(|o| !o.ok).map(|out| {
