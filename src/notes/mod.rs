@@ -1,8 +1,6 @@
 //! Standalone Markdown notes (not tied to a task). Index in `notes.json`, each body in
 //! `notes/<id>.md`. All mutations go through `NoteStore`, which saves and notifies.
 
-pub mod blocks;
-
 use chrono::{DateTime, Utc};
 use gpui_kit::{Context, SharedString};
 use serde::{Deserialize, Serialize};

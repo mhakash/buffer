@@ -1,5 +1,6 @@
 mod actions;
 mod components;
+mod editor;
 mod focus;
 mod net;
 mod notes;
@@ -34,6 +35,7 @@ fn main() {
         prefs::init(cx);
         theme::init(cx);
         actions::init(cx);
+        editor::init(cx);
 
         if !cfg!(target_os = "macos") {
             cx.on_window_closed(|cx, _| {

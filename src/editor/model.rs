@@ -1,6 +1,8 @@
-//! A note body as Notion-style blocks over Markdown. `parse` cuts Markdown into blocks and
+//! A Markdown body (note or task notes) as Notion-style blocks. `parse` cuts Markdown into blocks and
 //! `Doc::to_markdown` writes them back; blocks that were never edited keep their source byte for
 //! byte, so opening a note (or editing one block) never reformats the rest of the file.
+
+use std::ops::Range;
 
 /// What a block is. Text kinds (`is_text`) edit inline; `Code` and `Raw` edit their source.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -196,6 +198,64 @@ impl Doc {
             out.push_str(&self.tail);
         }
         out
+    }
+}
+
+/// Range operations used by selection, clipboard and drag.
+impl Doc {
+    /// Markdown of `range` on its own (copying blocks); untouched blocks keep their source.
+    pub fn range_markdown(&self, range: Range<usize>) -> String {
+        let mut part = Doc {
+            blocks: self.blocks[range].to_vec(),
+            ..Doc::default()
+        };
+        if let Some(first) = part.blocks.first_mut() {
+            first.gap = None;
+        }
+        part.to_markdown()
+    }
+
+    /// `blocks` (parsed elsewhere, or copies) with fresh ids, ready to insert here.
+    pub fn adopt(&mut self, blocks: impl IntoIterator<Item = Block>) -> Vec<Block> {
+        blocks
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut block)| {
+                block.id = self.next_id();
+                if i == 0 {
+                    block.gap = None;
+                }
+                block
+            })
+            .collect()
+    }
+
+    /// Move `range` to insertion index `to` (counted before the move); returns where it landed.
+    /// Dropping a range inside itself is a no-op.
+    pub fn move_range(&mut self, range: Range<usize>, to: usize) -> Range<usize> {
+        if to >= range.start && to <= range.end {
+            return range;
+        }
+        let len = range.len();
+        let moved: Vec<Block> = self.blocks.drain(range.clone()).collect();
+        let at = if to > range.end { to - len } else { to };
+        self.blocks.splice(at..at, moved);
+        self.tidy();
+        at..at + len
+    }
+
+    /// After blocks were moved, inserted or removed: numbered items are rewritten so their
+    /// numbers follow their positions, and whatever is now first starts the body (no blank
+    /// lines carried over from where it came from).
+    pub fn tidy(&mut self) {
+        for block in &mut self.blocks {
+            if block.kind == Kind::Numbered {
+                block.touch();
+            }
+        }
+        if let Some(first) = self.blocks.first_mut() {
+            first.gap = None;
+        }
     }
 }
 
@@ -541,6 +601,42 @@ mod tests {
         assert_eq!(inline_markdown("# not a heading"), "\\# not a heading");
         assert_eq!(inline_markdown("1. no"), "1\\. no");
         assert_eq!(inline_markdown("**bold**"), "**bold**");
+    }
+
+    #[test]
+    fn copies_ranges_verbatim() {
+        let doc = parse("intro\n\n* star\n* two\n\n## H");
+        assert_eq!(doc.range_markdown(1..3), "* star\n* two");
+        assert_eq!(doc.range_markdown(2..4), "* two\n\n## H");
+    }
+
+    #[test]
+    fn adopted_blocks_get_fresh_ids() {
+        let mut doc = parse("a\n\nb");
+        let pasted = parse("x\n\ny").blocks;
+        let ids: Vec<u64> = doc.adopt(pasted).iter().map(|b| b.id).collect();
+        assert_eq!(ids, [3, 4]);
+    }
+
+    #[test]
+    fn moves_ranges() {
+        let text = |d: &Doc| d.blocks.iter().map(|b| b.text.clone()).collect::<Vec<_>>();
+        let mut doc = parse("a\n\nb\n\nc\n\nd");
+        assert_eq!(doc.move_range(0..2, 4), 2..4);
+        assert_eq!(text(&doc), ["c", "d", "a", "b"]);
+        assert_eq!(doc.move_range(2..4, 0), 0..2);
+        assert_eq!(text(&doc), ["a", "b", "c", "d"]);
+        assert_eq!(doc.move_range(1..3, 2), 1..3, "inside itself");
+        let mut doc = parse("1. a\n2. b");
+        doc.move_range(1..2, 0);
+        assert_eq!(doc.to_markdown(), "1. b\n2. a");
+        let mut doc = parse("a\n\nb\n");
+        doc.move_range(1..2, 0);
+        assert_eq!(
+            doc.to_markdown(),
+            "b\n\na\n",
+            "no blank line before the new first block"
+        );
     }
 
     #[test]

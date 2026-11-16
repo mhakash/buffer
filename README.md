@@ -136,7 +136,13 @@ Untouched blocks are saved byte for byte, so the file stays yours.
 | ↑ ↓ ← → at an edge · Tab / ⇧Tab | Move between blocks · nest / un-nest list items |
 | ⌘B ⌘I ⌘E ⌘⇧X ⌘K | Bold, italic, code, strikethrough, link |
 | ⌘Enter in code | Leave the code block |
-| ⋮⋮ handle on hover | Turn into, move up/down, duplicate, delete |
+| Esc while editing · ⇧↑/⇧↓ at a block's edge | Select the block (then ↑↓ move, ⇧↑↓ extend, Enter edits, Esc leaves) |
+| Drag from one block onto another · shift-click · ⌘A twice | Select a run of blocks |
+| ⌘C ⌘X ⌘V on selected blocks | Copy / cut as Markdown, paste after; Markdown with several blocks pasted into a block splits it |
+| Backspace · ⌘D · ⌘⇧↑/↓ · Tab | Delete · duplicate · move up/down · nest (selected blocks, or the block being edited) |
+| ⌘Z / ⌘⇧Z | Undo / redo (typing in the open block first, then block changes) |
+| Drag ⋮⋮ | Move the block (or the whole selection); a line shows where it lands |
+| Click ⋮⋮ or right-click a block | Turn into, copy, duplicate, move up/down, delete |
 
 ## Markdown extras
 
@@ -178,7 +184,8 @@ pulsing indicators (saves battery). macOS "Reduce motion" is honoured by every a
 | `src/prefs.rs` | `settings.json` (appearance, name, ambient) as a global |
 | `src/theme.rs` | Light/dark appearance over gpui-kit's `Theme`; loads `themes/` |
 | `src/focus/` | `FocusTimer` entity (pomodoro state, `focus.json`) |
-| `src/notes/` | `NoteStore` entity (`notes.json` + `notes/<id>.md`); `blocks.rs` = Markdown ⇄ blocks |
+| `src/notes/` | `NoteStore` entity (`notes.json` + `notes/<id>.md`) |
+| `src/editor/` | Block editor for notes and task notes; `mod.rs` lists its files |
 | `src/net.rs` | HTTP client GPUI uses for remote images |
 | `src/quotes.rs` | Daily sidebar line + time-of-day greeting |
 | `themes/buffer.json` | Light + dark palettes (hot-reloaded in debug builds) |

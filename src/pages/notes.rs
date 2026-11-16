@@ -1,6 +1,6 @@
 //! Standalone Markdown notes, Notion-style: a list pane and a document pane that fill the
 //! content area. The title is always editable; the body is a Notion-style block editor
-//! (`block_editor`), or its Markdown source. Full view hides the list.
+//! (`editor`), or its Markdown source. Full view hides the list.
 
 use gpui_kit::component::{
     ActiveTheme, Icon, Sizable, Size, Theme,
@@ -15,12 +15,10 @@ use gpui_kit::{
     assets::IconName, div, prelude::*, px, rgb,
 };
 
-use super::{
-    block_editor::{BlockEditor, BlockEditorEvent},
-    task_detail::when,
-};
+use super::task_detail::when;
 use crate::{
     components::{category_tag, confirm::confirm_delete, icon_button, property_row},
+    editor::{BlockEditor, BlockEditorEvent},
     notes::{Note, NoteId, NoteStore},
     tasks::{TaskStore, is_url},
 };

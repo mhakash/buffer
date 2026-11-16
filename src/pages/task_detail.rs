@@ -21,12 +21,10 @@ use gpui_kit::{
     SharedString, Subscription, Window, assets::IconName, div, ease_out_quint, prelude::*, px, rgb,
 };
 
-use super::{
-    block_editor::{BlockEditor, BlockEditorEvent},
-    tasks::due_label,
-};
+use super::tasks::due_label;
 use crate::{
     components::{category_tag, confirm::confirm_delete, fx, icon_button, property_row},
+    editor::{BlockEditor, BlockEditorEvent},
     tasks::{Id, LinkKind, Task, TaskStore, classify, is_url},
 };
 
