@@ -93,6 +93,7 @@ API source of truth: `~/.cargo/registry/src/*/{gpui-pre-0.3.12,gpui-base-0.9.1,g
 | Hover-only row actions | parent `.group(name)`, child `.opacity(0.).group_hover(name, \|s\| s.opacity(1.))`; group name unique per row |
 | Element IDs | tuple form `("prefix", u64)`; keep prefixes unique per view |
 | Mermaid look | palette built from the app theme in `diagram_theme`; renderer output post-processed in `polish_svg` (radii, edge width); canvas is transparent, so put it on an opaque surface |
+| Box with `w_full` + `max_w` + `aspect_ratio` is far too tall | Taffy takes height from the unclamped width; also set `max_h` (see Mermaid in `components/markdown.rs`) |
 | SVG `img` shown larger than natural size is blurry (rasterized at natural × 2) | re-emit the SVG with scaled `width`/`height` (`scale_svg`) |
 | Synthetic Esc (CGEvent) ignored in UI checks | macOS routes Esc through the input context; set the event's unicode string to `\u{1b}` |
 | Global shortcuts | bind with `secondary-` (cmd on mac, ctrl elsewhere), `None` context; handle on `Workspace` root via `.on_action` |

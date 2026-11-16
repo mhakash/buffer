@@ -392,6 +392,8 @@ impl MarkdownPlugin for MermaidPlugin {
         match render_diagram(source, theme) {
             // Natural size, shrunk to the column. `img` alone keeps its intrinsic height when
             // shrunk, so a box sized by aspect ratio carries the layout and the image fills it.
+            // Taffy derives the height from the full-column width before `max_w` clamps it, so
+            // a narrow diagram would get a far taller box: `max_h` caps it at natural height.
             Ok(diagram) => {
                 let (w, h) = diagram.size;
                 let mut hasher = DefaultHasher::new();
@@ -401,6 +403,7 @@ impl MarkdownPlugin for MermaidPlugin {
                         .id(("mermaid", hasher.finish()))
                         .w_full()
                         .max_w(px(w))
+                        .max_h(px(h))
                         .aspect_ratio(w / h.max(1.))
                         .cursor(CursorStyle::PointingHand)
                         .child(img(diagram.image.clone()).size_full())
