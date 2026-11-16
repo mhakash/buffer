@@ -204,6 +204,28 @@ impl Output {
     pub fn is_fresh(&self, ttl: u64, now: DateTime<Utc>) -> bool {
         ttl == 0 || (now - self.ran_at).num_seconds() < ttl as i64
     }
+
+    /// A failed run keeps the last good Markdown so the block doesn't go blank on a hiccup.
+    pub fn keeping(mut self, previous: Option<&Output>) -> Self {
+        if !self.ok
+            && self.markdown.trim().is_empty()
+            && let Some(prev) = previous
+        {
+            self.markdown = prev.markdown.clone();
+        }
+        self
+    }
+}
+
+/// "just now", "3m ago", "2h ago", "4d ago".
+pub fn ago(then: DateTime<Utc>, now: DateTime<Utc>) -> String {
+    let s = (now - then).num_seconds().max(0);
+    match s {
+        0..60 => "just now".into(),
+        60..3600 => format!("{}m ago", s / 60),
+        3600..86400 => format!("{}h ago", s / 3600),
+        _ => format!("{}d ago", s / 86400),
+    }
 }
 
 /// FNV-1a 64: stable across builds, unlike `DefaultHasher`, so cache file names survive upgrades.
@@ -327,6 +349,36 @@ mod tests {
         assert!(out.is_fresh(300, now));
         assert!(!out.is_fresh(60, now));
         assert!(out.is_fresh(0, now));
+    }
+
+    #[test]
+    fn failure_keeps_last_markdown() {
+        let now = Utc::now();
+        let out = |markdown: &str, ok| Output {
+            markdown: markdown.into(),
+            stderr: String::new(),
+            ok,
+            ran_at: now,
+            duration_ms: 0,
+        };
+        let good = out("table", true);
+        assert_eq!(out("", false).keeping(Some(&good)).markdown, "table");
+        assert_eq!(
+            out("partial", false).keeping(Some(&good)).markdown,
+            "partial"
+        );
+        assert_eq!(out("", true).keeping(Some(&good)).markdown, "");
+    }
+
+    #[test]
+    fn relative_times() {
+        let now = Utc::now();
+        let at = |s| now - chrono::Duration::seconds(s);
+        assert_eq!(ago(at(5), now), "just now");
+        assert_eq!(ago(at(-5), now), "just now");
+        assert_eq!(ago(at(180), now), "3m ago");
+        assert_eq!(ago(at(7200), now), "2h ago");
+        assert_eq!(ago(at(4 * 86400), now), "4d ago");
     }
 
     #[test]

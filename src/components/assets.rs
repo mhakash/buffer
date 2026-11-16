@@ -67,7 +67,11 @@ impl AssetSource for Assets {
         if let Some(bytes) = ExtraIcons.load(path)? {
             return Ok(Some(bytes));
         }
-        gpui_kit::assets::Assets.load(path)
+        if let Ok(Some(bytes)) = gpui_kit::assets::Assets.load(path) {
+            return Ok(Some(bytes));
+        }
+        // Full Lucide catalog (~750 KB): lets block types pick any icon by name.
+        gpui_kit::assets::AllAssets.load(path)
     }
 
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
@@ -152,9 +156,14 @@ mod tests {
             IconName::Trophy,
             IconName::X,
             IconName::Zap,
+            IconName::RefreshCw,
+            IconName::ChevronDown,
+            IconName::ChevronRight,
         ] {
             let bytes = Assets.load(&name.path()).unwrap().unwrap();
             assert!(std::str::from_utf8(&bytes).unwrap().contains("<svg"));
         }
+        // Block type icons come from the full catalog by name.
+        assert!(Assets.load("icons/kanban.svg").unwrap().is_some());
     }
 }

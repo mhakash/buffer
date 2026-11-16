@@ -11,7 +11,7 @@
 //! State is the [`Blocks`] global, reloaded per workspace by [`load`]. Runs happen on a thread;
 //! a finished run updates the global and repaints every window, so renderers just read [`status`].
 
-// Renderers and the Blocks page (later phases) are the callers.
+// Editing block types (`store::save`, …) is for the Blocks page, still to come.
 #![allow(dead_code)]
 
 pub mod model;
@@ -42,6 +42,8 @@ pub struct Blocks {
     /// Results by key; `None` = looked on disk, nothing cached.
     results: HashMap<String, Option<Output>>,
     running: HashSet<String>,
+    /// Failed blocks whose stderr is expanded.
+    details: HashSet<String>,
 }
 
 impl Global for Blocks {}
@@ -117,9 +119,15 @@ fn start(ty: &BlockType, config: &Config, cx: &mut App) {
         env: ty.env.clone().into_iter().collect(),
         timeout: Duration::from_secs(ty.timeout),
     };
+    let previous = cx
+        .default_global::<Blocks>()
+        .results
+        .get(&key)
+        .cloned()
+        .flatten();
     let (tx, rx) = oneshot::channel();
     thread::spawn(move || {
-        let output = runner::run(&job);
+        let output = runner::run(&job).keeping(previous.as_ref());
         if let Err(err) = storage::save_at(&cache, &output) {
             eprintln!("couldn't cache block output: {err:#}");
         }
@@ -131,6 +139,19 @@ fn start(ty: &BlockType, config: &Config, cx: &mut App) {
         }
     })
     .detach();
+}
+
+pub fn details_open(key: &str, cx: &App) -> bool {
+    cx.try_global::<Blocks>()
+        .is_some_and(|b| b.details.contains(key))
+}
+
+pub fn toggle_details(key: &str, cx: &mut App) {
+    let details = &mut cx.default_global::<Blocks>().details;
+    if !details.remove(key) {
+        details.insert(key.to_string());
+    }
+    cx.refresh_windows();
 }
 
 fn finish(generation: u64, key: String, output: Output, cx: &mut App) {

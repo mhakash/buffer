@@ -9,9 +9,10 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
+use gpui_kit::assets::IconName;
 use gpui_kit::component::Theme;
 use gpui_kit::component::{
-    ActiveTheme, h_flex,
+    ActiveTheme, Disableable, Icon, Sizable, h_flex,
     text::{
         MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, TextView,
         TextViewStyle, markdown_ast,
@@ -19,12 +20,14 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    App, CursorStyle, ElementId, Hsla, Image, ImageFormat, ImageSource, InteractiveElement,
-    IntoElement, ObjectFit, ParentElement, Rgba, SharedString, SharedUri,
-    StatefulInteractiveElement, Styled, StyledImage, Window, div, img, px, rems,
+    App, CursorStyle, ElementId, FontWeight, Hsla, Image, ImageFormat, ImageSource,
+    InteractiveElement, IntoElement, ObjectFit, ParentElement, Rgba, SharedString, SharedUri,
+    StatefulInteractiveElement, Styled, StyledImage, Window, div, img, prelude::FluentBuilder as _,
+    px, rems,
 };
 
 use super::lightbox;
+use crate::blocks::{self, model::Config};
 
 /// Markdown notes sit under small section labels: headings stay close to the body size
 /// (hierarchy from weight) and paragraphs tight.
@@ -52,6 +55,16 @@ pub fn document_style() -> TextViewStyle {
 /// A Markdown view with the app's extras. `dir` is the note's folder: relative image paths
 /// resolve against it.
 pub fn markdown_view(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    style: TextViewStyle,
+    dir: PathBuf,
+) -> TextView {
+    base_view(id, text, style, dir.clone()).plugin(BlockPlugin { dir })
+}
+
+/// Everything but programmatic blocks: a block's own output can't run more blocks.
+fn base_view(
     id: impl Into<ElementId>,
     text: impl Into<SharedString>,
     style: TextViewStyle,
@@ -491,6 +504,228 @@ impl MarkdownPlugin for ImagePlugin {
     }
 }
 
+const BLOCK: &str = "block";
+
+/// ```` ```block <name> ```` fences: runs the block type's script (see `crate::blocks`) and shows
+/// its Markdown in a card. Results are cached; stale ones re-run when shown.
+struct BlockPlugin {
+    dir: PathBuf,
+}
+
+struct Fence {
+    name: String,
+    config: Config,
+    source: String,
+}
+
+impl MarkdownPlugin for BlockPlugin {
+    fn is_block(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &str {
+        BLOCK
+    }
+
+    fn parse(
+        &self,
+        node: &markdown_ast::Node,
+        cx: &MarkdownParseContext<'_>,
+    ) -> Option<MarkdownNode> {
+        let markdown_ast::Node::Code(code) = node else {
+            return None;
+        };
+        let info = format!(
+            "{} {}",
+            code.lang.as_deref().unwrap_or_default(),
+            code.meta.as_deref().unwrap_or_default()
+        );
+        let name = blocks::model::fence_type(&info)?.to_string();
+        Some(
+            MarkdownNode::new(
+                BLOCK,
+                Fence {
+                    name,
+                    config: blocks::model::parse_config(&code.value),
+                    source: code.value.clone(),
+                },
+            )
+            .text(code.value.clone())
+            .markdown(cx.node_source(node).unwrap_or(&code.value).to_string()),
+        )
+    }
+
+    fn render(&self, node: &MarkdownNode, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        let card = v_flex()
+            .w_full()
+            .my_2()
+            .p_4()
+            .gap_2()
+            .rounded_2xl()
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.group_box);
+        let Some(fence) = node.data::<Fence>() else {
+            return card.into_any_element();
+        };
+        let Some(ty) = blocks::find(&fence.name, cx).cloned() else {
+            return card
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(theme.muted_foreground)
+                        .child(format!("Unknown block type “{}”", fence.name)),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .font_family(theme.mono_font_family.clone())
+                        .text_color(theme.muted_foreground)
+                        .whitespace_normal()
+                        .child(fence.source.clone()),
+                )
+                .into_any_element();
+        };
+        blocks::ensure(&ty, &fence.config, cx);
+        let status = blocks::status(&ty, &fence.config, cx);
+        let key = ty.key(&fence.config);
+        let id = u64::from_str_radix(&key, 16).unwrap_or_default();
+        let group: SharedString = format!("block-{key}").into();
+        let now = chrono::Utc::now();
+
+        let note = match (&status.output, status.running) {
+            (_, true) => "Running…".to_string(),
+            (Some(out), _) if out.ok => format!("Updated {}", blocks::model::ago(out.ran_at, now)),
+            (Some(out), _) => format!("Failed {}", blocks::model::ago(out.ran_at, now)),
+            (None, false) => "Not run yet".to_string(),
+        };
+        let icon = Icon::empty()
+            .path(block_icon(&ty.icon, cx))
+            .small()
+            .text_color(theme.muted_foreground);
+        let ambient = crate::prefs::get(cx).ambient;
+        let refresh = {
+            let (ty, config) = (ty.clone(), fence.config.clone());
+            super::icon_button(
+                ("block-refresh", id),
+                IconName::RefreshCw,
+                theme.muted_foreground,
+                "Refresh",
+            )
+            .xsmall()
+            .disabled(status.running)
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                blocks::refresh(&ty, &config, cx);
+            })
+        };
+        let header = h_flex()
+            .w_full()
+            .gap_2()
+            .items_center()
+            .child(if status.running {
+                super::fx::pulse(icon, ("block-pulse", id), ambient, 0.35)
+            } else {
+                icon.into_any_element()
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_sm()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(ty.label().to_string()),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(note),
+            )
+            .child(
+                div()
+                    .opacity(0.)
+                    .group_hover(group.clone(), |s| s.opacity(1.))
+                    .child(refresh),
+            );
+
+        let body = status.output.as_ref().and_then(|out| {
+            (!out.markdown.trim().is_empty()).then(|| {
+                base_view(
+                    ("block-out", id),
+                    out.markdown.clone(),
+                    markdown_style(),
+                    self.dir.clone(),
+                )
+                .into_any_element()
+            })
+        });
+        let error = status.output.as_ref().filter(|o| !o.ok).map(|out| {
+            let open = blocks::details_open(&key, cx);
+            let first = out.stderr.lines().next().unwrap_or_default().to_string();
+            let more = out.stderr.lines().nth(1).is_some();
+            let toggle_key = key.clone();
+            v_flex()
+                .gap_1()
+                .child(
+                    h_flex()
+                        .id(("block-err", id))
+                        .gap_1()
+                        .items_center()
+                        .text_xs()
+                        .text_color(theme.danger)
+                        .when(more, |d| {
+                            d.cursor(CursorStyle::PointingHand)
+                                .on_click(move |_, _, cx| {
+                                    cx.stop_propagation();
+                                    blocks::toggle_details(&toggle_key, cx);
+                                })
+                        })
+                        .when(more, |d| {
+                            d.child(
+                                Icon::new(if open {
+                                    IconName::ChevronDown
+                                } else {
+                                    IconName::ChevronRight
+                                })
+                                .xsmall()
+                                .text_color(theme.danger),
+                            )
+                        })
+                        .child(div().min_w_0().truncate().child(first)),
+                )
+                .when(open, |d| {
+                    d.child(
+                        div()
+                            .text_xs()
+                            .font_family(theme.mono_font_family.clone())
+                            .text_color(theme.muted_foreground)
+                            .whitespace_normal()
+                            .child(out.stderr.clone()),
+                    )
+                })
+        });
+
+        card.group(group)
+            .child(header)
+            .children(body)
+            .children(error)
+            .into_any_element()
+    }
+}
+
+/// A block type's icon: any Lucide name (`list-checks`), else a default.
+fn block_icon(name: &str, cx: &App) -> SharedString {
+    let path = format!("icons/{}.svg", name.trim());
+    if !name.trim().is_empty() && matches!(cx.asset_source().load(&path), Ok(Some(_))) {
+        path.into()
+    } else {
+        IconName::Zap.path()
+    }
+}
+
 const FRONTMATTER: &str = "frontmatter";
 
 /// A leading `---` YAML block, shown like the note's own properties.
@@ -585,8 +820,7 @@ impl MarkdownPlugin for FrontmatterPlugin {
                         .child(values.first().cloned().unwrap_or_default())
                         .into_any_element()
                 };
-                super::property_row(gpui_kit::assets::IconName::FileText, key.clone(), theme)
-                    .child(value)
+                super::property_row(IconName::FileText, key.clone(), theme).child(value)
             }))
     }
 }
