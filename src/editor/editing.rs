@@ -17,6 +17,12 @@ impl BlockEditor {
         let Some(ix) = self.active else { return };
         let text = self.text(cx);
         let kind = self.doc.blocks[ix].kind.clone();
+        if kind == Kind::Table {
+            self.set_cell_text(ix, &text);
+            self.typed = true;
+            self.changed(cx);
+            return;
+        }
         if let Some((new_kind, len)) = model::shortcut(&kind, &text) {
             let rest = text[len..].to_string();
             self.convert(ix, new_kind, rest, window, cx);
@@ -25,7 +31,7 @@ impl BlockEditor {
         let was_query = slash_query(&self.doc.blocks[ix].text).is_some();
         self.doc.blocks[ix].set_text(text.clone());
         self.typed = true;
-        self.update_slash(was_query, &text, &kind);
+        self.update_slash(was_query, &text, &kind, window, cx);
         self.changed(cx);
     }
 
@@ -70,8 +76,8 @@ impl BlockEditor {
     /// "+": a new block below with the `/` menu open.
     pub(super) fn add_below(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
         let Some(ix) = self.index_of(id) else { return };
-        self.insert_after(ix, "/", window, cx);
-        self.slash = Some(0);
+        self.insert_after(ix, "", window, cx);
+        self.open_slash("", "", window, cx);
     }
 
     pub(super) fn toggle_todo(&mut self, id: u64, cx: &mut Context<Self>) {
@@ -97,6 +103,15 @@ impl BlockEditor {
         }
         let block = &self.doc.blocks[ix];
         let (kind, indent) = (block.kind.clone(), block.indent);
+        if kind == Kind::Table {
+            cx.stop_propagation();
+            if action.secondary {
+                self.insert_after(ix, "", window, cx);
+            } else {
+                self.cell_below(ix, window, cx);
+            }
+            return;
+        }
         if !kind.is_text() {
             // Code keeps newlines; ⌘Enter leaves it.
             if action.secondary {
@@ -157,6 +172,13 @@ impl BlockEditor {
     /// At the start of a block: turn it into text, then join it to the block above.
     pub(super) fn edit_backspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(ix) = self.active else { return };
+        if self.slash.is_some() {
+            self.slash_backspace(window, cx);
+            return;
+        }
+        if self.doc.blocks[ix].kind == Kind::Table {
+            return; // only ever edits the cell
+        }
         let range = self.input.read(cx).selected_range();
         if !range.is_empty() || range.start > 0 {
             return;
@@ -203,6 +225,9 @@ impl BlockEditor {
     /// Forward delete at the end pulls the next text block up.
     pub(super) fn edit_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(ix) = self.active else { return };
+        if self.slash.is_some() {
+            return;
+        }
         let text = self.text(cx);
         let range = self.input.read(cx).selected_range();
         let joinable = |k: &Kind| k.is_text();
@@ -274,8 +299,27 @@ impl BlockEditor {
         } else {
             self.on_last_row(cx)
         };
+        if at_edge && self.doc.blocks[ix].kind == Kind::Table {
+            cx.stop_propagation();
+            self.cell_vertical(ix, step, window, cx);
+            return;
+        }
         if at_edge && let Some(next) = self.neighbour(ix, step) {
             cx.stop_propagation();
+            let caret = if step < 0 { Caret::End } else { Caret::Start };
+            self.activate(next, caret, window, cx);
+        }
+    }
+
+    /// From a table's first/last row, or a cell's edge: the block above/below.
+    pub(super) fn leave_table(
+        &mut self,
+        ix: usize,
+        step: isize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(next) = self.neighbour(ix, step) {
             let caret = if step < 0 { Caret::End } else { Caret::Start };
             self.activate(next, caret, window, cx);
         }
@@ -289,6 +333,9 @@ impl BlockEditor {
         cx: &mut Context<Self>,
     ) {
         let Some(ix) = self.active else { return };
+        if self.slash.is_some() {
+            return;
+        }
         let range = self.input.read(cx).selected_range();
         let at_edge = range.is_empty()
             && if step < 0 {
@@ -296,6 +343,11 @@ impl BlockEditor {
             } else {
                 range.start >= self.text(cx).len()
             };
+        if at_edge && self.doc.blocks[ix].kind == Kind::Table {
+            cx.stop_propagation();
+            self.cell_step(ix, step, false, window, cx);
+            return;
+        }
         if at_edge && let Some(next) = self.neighbour(ix, step) {
             cx.stop_propagation();
             let caret = if step < 0 { Caret::End } else { Caret::Start };
@@ -306,6 +358,9 @@ impl BlockEditor {
     /// ⇧↑/⇧↓ on the first/last line selects the block (then extends like Notion).
     pub(super) fn edit_extend(&mut self, step: isize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(ix) = self.active else { return };
+        if self.slash.is_some() {
+            return;
+        }
         let at_edge = if step < 0 {
             self.on_first_row(cx)
         } else {
@@ -319,6 +374,9 @@ impl BlockEditor {
 
     /// ⌘A selects the block's text first, then every block.
     pub(super) fn edit_select_all(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.slash.is_some() {
+            return;
+        }
         let range = self.input.read(cx).selected_range();
         let len = self.text(cx).len();
         if range.start == 0 && range.end == len {
@@ -327,8 +385,18 @@ impl BlockEditor {
         }
     }
 
-    pub(super) fn edit_indent(&mut self, step: isize, cx: &mut Context<Self>) {
+    pub(super) fn edit_indent(&mut self, step: isize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(ix) = self.active else { return };
+        if self.slash.is_some() {
+            cx.stop_propagation();
+            self.move_slash(step, cx);
+            return;
+        }
+        if self.doc.blocks[ix].kind == Kind::Table {
+            cx.stop_propagation();
+            self.cell_step(ix, step, true, window, cx);
+            return;
+        }
         if !self.doc.blocks[ix].kind.is_text() {
             return; // Tab in code
         }
@@ -340,8 +408,8 @@ impl BlockEditor {
     pub(super) fn edit_escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(ix) = self.active else { return };
         cx.stop_propagation();
-        if self.slash.take().is_some() {
-            cx.notify();
+        if self.slash.is_some() {
+            self.close_slash(true, window, cx);
         } else {
             self.select(Selection::one(ix), window, cx);
         }
@@ -354,7 +422,7 @@ impl BlockEditor {
         cx: &mut Context<Self>,
     ) {
         let Some(ix) = self.active else { return };
-        if !self.doc.blocks[ix].kind.is_text() {
+        if self.slash.is_some() || !self.edits_inline(ix) {
             return;
         }
         let text = self.text(cx);
@@ -368,7 +436,7 @@ impl BlockEditor {
     /// ⌘K: `[selection](|)`.
     pub(super) fn link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(ix) = self.active else { return };
-        if !self.doc.blocks[ix].kind.is_text() {
+        if self.slash.is_some() || !self.edits_inline(ix) {
             return;
         }
         let text = self.text(cx);
@@ -380,5 +448,11 @@ impl BlockEditor {
             input.replace_all(new, window, cx);
             input.set_selected_range(caret..caret, cx);
         });
+    }
+
+    /// The active text is inline Markdown (a text block, or a table cell).
+    fn edits_inline(&self, ix: usize) -> bool {
+        let kind = &self.doc.blocks[ix].kind;
+        kind.is_text() || *kind == Kind::Table
     }
 }

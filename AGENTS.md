@@ -107,7 +107,8 @@ Screen recording + Accessibility are granted to the host app, so verify visual c
 | `list` | on-screen windows front→back: owner, PID, window id, bounds |
 | `top X Y` | owner of the topmost window at a point — check before **every** click |
 | `move PID X Y` | move that app's window (AX) |
-| `mouse move\|click X Y`, `mouse drag X Y X2 Y2` | post mouse events (global points) |
+| `mouse move\|click\|rclick X Y`, `mouse drag X Y X2 Y2` | post mouse events (global points) |
+| `key text "abc"`, `key code N` | type into the focused app (36 return, 48 tab, 51 delete, 53 esc) |
 | `frames IN.mov DIR t…` / `sheet OUT.png COLS imgs…` | pull frames from a recording / contact sheet |
 
 1. Launch: `(BUFFER_DATA_DIR=<scratch>/wd perl -e 'alarm 600; exec @ARGV' ./target/debug/buffer &)` — the alarm guarantees it quits.

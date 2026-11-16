@@ -1,14 +1,23 @@
-//! The `/` block menu: typing `/` in a text block lists block types, then the workspace's custom
-//! blocks (`crate::blocks`); ↑↓ Enter or a click turns the block into one. Also the built-in
-//! block-type list for the handle's "Turn into".
+//! The `/` block menu: typing `/` in an empty text block opens it with its own search field
+//! (focused; the `/` and what follows move there). It lists block types, then the workspace's
+//! custom blocks (`crate::blocks`); ↑↓ Enter or a click turns the block into one. Esc, a space,
+//! or a query with no match closes it and puts `/query` back into the block; Backspace on an
+//! empty query closes it. Also the built-in block-type list for the handle's "Turn into".
 
-use gpui_kit::component::{Icon, Sizable, Theme, h_flex, v_flex};
+use gpui_kit::component::{
+    Icon, Sizable, Theme, h_flex,
+    input::{Input, InputEvent, InputState},
+    v_flex,
+};
 use gpui_kit::{
-    AnyElement, App, Context, MouseButton, SharedString, Window, anchored, assets::IconName,
-    deferred, div, prelude::*, px,
+    AnyElement, App, Context, Entity, Focusable, MouseButton, SharedString, Window, anchored,
+    assets::IconName, deferred, div, prelude::*, px,
 };
 
-use super::{BlockEditor, model::Kind};
+use super::{
+    BlockEditor,
+    model::{Kind, Table},
+};
 use crate::blocks::{
     self,
     model::{FENCE, fence_type},
@@ -69,6 +78,7 @@ pub(super) fn block_types() -> Vec<BlockType> {
             IconName::Workflow,
             Kind::Code("mermaid".into()),
         ),
+        item("Table", "grid rows columns", IconName::Table, Kind::Table),
         item("Divider", "hr line rule", IconName::Minus, Kind::Divider),
     ]
 }
@@ -86,6 +96,7 @@ pub(super) fn kind_label(kind: &Kind) -> &'static str {
         Kind::Code(lang) if lang == "mermaid" => "Mermaid diagram source",
         Kind::Code(lang) if fence_type(lang).is_some() => "Config: one key: value per line",
         Kind::Code(_) => "Code",
+        Kind::Table => "Table",
         Kind::Divider | Kind::Raw => "Markdown",
     }
 }
@@ -114,8 +125,12 @@ fn slash_items(query: &str, cx: &App) -> Vec<SlashItem> {
         .map(|i| SlashItem {
             label: i.label.into(),
             icon: Icon::new(i.icon),
+            text: if i.kind == Kind::Table {
+                Table::new(3, 3).to_markdown()
+            } else {
+                String::new()
+            },
             kind: i.kind,
-            text: String::new(),
             custom: false,
         });
     let custom = blocks::types(cx)
@@ -132,18 +147,126 @@ fn slash_items(query: &str, cx: &App) -> Vec<SlashItem> {
 }
 
 impl BlockEditor {
-    fn slash_items(&self, cx: &Context<Self>) -> Vec<SlashItem> {
-        let query = slash_query(&self.text(cx)).unwrap_or_default();
-        slash_items(&query, cx)
+    fn slash_query(&self, cx: &App) -> String {
+        self.slash_input.read(cx).value().to_lowercase()
     }
 
-    /// After the active block's text changed: open on a new `/query`, keep open (back at the
-    /// top) while it's refined. Once dismissed it stays closed until a new `/` is typed.
-    pub(super) fn update_slash(&mut self, was_query: bool, text: &str, kind: &Kind) {
-        let open =
-            kind.is_text() && slash_query(text).is_some() && (self.slash.is_some() || !was_query);
-        self.slash = open.then_some(0);
+    fn slash_items(&self, cx: &Context<Self>) -> Vec<SlashItem> {
+        slash_items(&self.slash_query(cx), cx)
+    }
+
+    /// After the active block's text changed: a new `/query` opens the menu. Text put back by
+    /// closing it (already `/…`) doesn't reopen it.
+    pub(super) fn update_slash(
+        &mut self,
+        was_query: bool,
+        text: &str,
+        kind: &Kind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(query) = slash_query(text)
+            && kind.is_text()
+            && !was_query
+        {
+            self.open_slash("/", &query, window, cx);
+        }
+    }
+
+    /// Open the menu on the active block (emptied: its `/query` moves to the search field).
+    pub(super) fn open_slash(
+        &mut self,
+        prefix: &'static str,
+        query: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ix) = self.active else { return };
+        self.doc.blocks[ix].set_text("");
+        // The menu may cover the block; nothing of it should show through.
+        self.input.update(cx, |i, cx| {
+            i.set_value("", window, cx);
+            i.set_placeholder("", window, cx);
+        });
+        self.slash = Some(0);
+        self.slash_prefix = prefix;
         self.slash_scroll.scroll_to_item(0);
+        let query = query.to_string();
+        self.slash_input.update(cx, |i, cx| {
+            i.set_value(query, window, cx);
+            i.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    /// Close the menu and go back to writing in the block; `restore` puts `/query` back.
+    pub(super) fn close_slash(
+        &mut self,
+        restore: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.slash.take().is_none() {
+            return;
+        }
+        let Some(ix) = self.active else { return };
+        let text = if restore {
+            format!("{}{}", self.slash_prefix, self.slash_input.read(cx).value())
+        } else {
+            String::new()
+        };
+        // Set first, so the textarea's change doesn't reopen the menu.
+        self.doc.blocks[ix].set_text(text.clone());
+        let end = text.len();
+        let hint = super::placeholder(&self.doc.blocks[ix].kind);
+        self.input.update(cx, |i, cx| {
+            i.set_placeholder(hint, window, cx);
+            i.set_value(text, window, cx);
+            i.set_selected_range(end..end, cx);
+            i.focus(window, cx);
+        });
+        self.changed(cx);
+    }
+
+    pub(super) fn on_slash_input_event(
+        &mut self,
+        _: &Entity<InputState>,
+        event: &InputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.slash.is_none() {
+            return;
+        }
+        match event {
+            InputEvent::Change => {
+                let query = self.slash_query(cx);
+                // Writing on (a space, or nothing matches): it was text, not a command.
+                if query.contains(char::is_whitespace) || self.slash_items(cx).is_empty() {
+                    self.close_slash(true, window, cx);
+                } else {
+                    self.slash = Some(0);
+                    self.slash_scroll.scroll_to_item(0);
+                    cx.notify();
+                }
+            }
+            InputEvent::Blur => cx.defer_in(window, |this, window, cx| {
+                if !this.slash_input.focus_handle(cx).is_focused(window) {
+                    this.slash = None;
+                    this.deactivate_if_unfocused(window, cx);
+                    cx.notify();
+                }
+            }),
+            _ => {}
+        }
+    }
+
+    /// Backspace in the search field: on an empty query it closes the menu (drops the `/`).
+    pub(super) fn slash_backspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.slash_input.read(cx).value().is_empty() {
+            cx.stop_propagation();
+            self.close_slash(false, window, cx);
+        }
     }
 
     pub(super) fn apply_slash(&mut self, item: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -193,7 +316,7 @@ impl BlockEditor {
                 .when(i != selected, |s| s.hover(|s| s.bg(theme.secondary)))
                 .child(item.icon.small().text_color(theme.muted_foreground))
                 .child(item.label)
-                // Mouse down, so the textarea keeps focus.
+                // Mouse down, so the search field keeps focus.
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _, window, cx| {
@@ -205,13 +328,29 @@ impl BlockEditor {
                 .when(first_custom == Some(i), |d| d.child(section("Custom")))
                 .child(row)
         });
+        let list = v_flex()
+            .id("slash-list")
+            .max_h(px(280.))
+            .overflow_y_scroll()
+            .track_scroll(&self.slash_scroll)
+            .child(section(if empty {
+                "No matching blocks"
+            } else {
+                "Blocks"
+            }))
+            .children(rows);
+        let search = Input::new(&self.slash_input)
+            .small()
+            .appearance(false)
+            .prefix(
+                Icon::new(IconName::Search)
+                    .small()
+                    .text_color(theme.muted_foreground),
+            );
         let body = v_flex()
             .id("slash-menu")
             .occlude()
             .w(px(240.))
-            .max_h(px(320.))
-            .overflow_y_scroll()
-            .track_scroll(&self.slash_scroll)
             .mt_1()
             .p_1()
             .rounded_xl()
@@ -219,12 +358,17 @@ impl BlockEditor {
             .border_1()
             .border_color(theme.border)
             .text_color(theme.popover_foreground)
-            .child(section(if empty {
-                "No matching blocks"
-            } else {
-                "Blocks"
-            }))
-            .children(rows);
+            // A press on the menu's padding mustn't take focus from the search field.
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .pb_1()
+                    .mb_1()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .child(search),
+            )
+            .child(list);
         deferred(anchored().snap_to_window_with_margin(px(8.)).child(body))
             .with_priority(1)
             .into_any_element()

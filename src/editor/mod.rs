@@ -12,7 +12,8 @@
 //! | `keymap` | actions and key bindings |
 //! | `keys` | routes key actions to editing or selection handlers |
 //! | `editing` | keys inside the active block, Markdown shortcuts, inline marks |
-//! | `slash` | the `/` block menu |
+//! | `slash` | the `/` block menu (its own search field) |
+//! | `table` | table cells: navigation, rows and columns |
 //! | `selection` | block selection by keyboard and mouse |
 //! | `ops` | structural changes on block ranges |
 //! | `clipboard` | copy / cut / paste |
@@ -32,12 +33,13 @@ mod ops;
 mod render;
 mod selection;
 mod slash;
+mod table;
 
 use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
 use gpui_kit::component::{
     ActiveTheme,
-    input::{InputEvent, TextareaState},
+    input::{InputEvent, InputState, TextareaState},
 };
 use gpui_kit::{
     AnyElement, App, Bounds, Context, Entity, EventEmitter, FocusHandle, Focusable, Modifiers,
@@ -47,7 +49,7 @@ use gpui_kit::{
 
 use block_menu::BlockMenu;
 use history::History;
-use model::{Doc, Kind};
+use model::{Doc, Kind, Table};
 use selection::{Press, Selection};
 use slash::kind_label;
 
@@ -77,6 +79,12 @@ pub struct BlockEditor {
     /// Highlighted row of the open `/` menu.
     slash: Option<usize>,
     slash_scroll: ScrollHandle,
+    /// The `/` menu's search field; it has focus while the menu is open.
+    slash_input: Entity<InputState>,
+    /// Put back before the query when the menu closes unused (`/` when it was typed).
+    slash_prefix: &'static str,
+    /// (row, column) being edited when the active block is a table.
+    cell: (usize, usize),
     selection: Option<Selection>,
     /// Left button held after pressing on a block (drag-select across blocks).
     press: Option<Press>,
@@ -109,9 +117,11 @@ impl Focusable for BlockEditor {
 impl BlockEditor {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let input = cx.new(|cx| TextareaState::new(window, cx).auto_grow(1, 5000));
+        let slash_input = cx.new(|cx| InputState::new(window, cx).placeholder("Search blocks"));
         let focus_handle = cx.focus_handle();
         let subscriptions = vec![
             cx.subscribe_in(&input, window, Self::on_input_event),
+            cx.subscribe_in(&slash_input, window, Self::on_slash_input_event),
             // Clicking away clears the selection (not while its menu has focus).
             cx.on_blur(&focus_handle, window, |this, _, cx| {
                 if this.block_menu.is_none() && this.selection.take().is_some() {
@@ -126,6 +136,9 @@ impl BlockEditor {
             input,
             slash: None,
             slash_scroll: ScrollHandle::new(),
+            slash_input,
+            slash_prefix: "",
+            cell: (0, 0),
             selection: None,
             press: None,
             drag_selecting: false,
@@ -173,7 +186,9 @@ impl BlockEditor {
 
     /// Keep focus in the editor if it had it (page navigation). False when it didn't.
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if self.active.is_some() {
+        if self.slash.is_some() {
+            self.slash_input.update(cx, |i, cx| i.focus(window, cx));
+        } else if self.active.is_some() {
             self.input.update(cx, |i, cx| i.focus(window, cx));
         } else if self.selection.is_some() {
             self.focus_handle.focus(window, cx);
@@ -234,7 +249,34 @@ impl BlockEditor {
         self.doc.blocks.iter().position(|b| b.id == id)
     }
 
+    /// Edit block `ix`; a table opens its first cell (`Caret::End`: its last).
     fn activate(&mut self, ix: usize, caret: Caret, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(b) = self.doc.blocks.get(ix)
+            && b.kind == Kind::Table
+        {
+            let table = Table::parse(&b.text);
+            self.cell = match caret {
+                Caret::End => (table.rows.len() - 1, table.cols() - 1),
+                _ => (0, 0),
+            };
+        }
+        self.open(ix, caret, window, cx);
+    }
+
+    /// Edit cell `(row, col)` of table block `ix`.
+    fn activate_cell(
+        &mut self,
+        ix: usize,
+        cell: (usize, usize),
+        caret: Caret,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.cell = cell;
+        self.open(ix, caret, window, cx);
+    }
+
+    fn open(&mut self, ix: usize, caret: Caret, window: &mut Window, cx: &mut Context<Self>) {
         if self
             .doc
             .blocks
@@ -250,16 +292,22 @@ impl BlockEditor {
         self.typed = false;
         self.slash = None;
         self.selection = None;
-        let text = block.text.clone();
+        let text = if block.kind == Kind::Table {
+            let table = Table::parse(&block.text);
+            self.cell = (
+                self.cell.0.min(table.rows.len() - 1),
+                self.cell.1.min(table.cols() - 1),
+            );
+            table.cell(self.cell.0, self.cell.1).to_string()
+        } else {
+            block.text.clone()
+        };
         let offset = match caret {
             Caret::Start => 0,
             Caret::End => text.len(),
             Caret::At(n) => n.min(text.len()),
         };
-        let placeholder = match &block.kind {
-            Kind::Paragraph => "Type ‘/’ for commands",
-            kind => kind_label(kind),
-        };
+        let placeholder = placeholder(&block.kind);
         self.input.update(cx, |input, cx| {
             input.set_value(text, window, cx);
             input.set_placeholder(placeholder, window, cx);
@@ -320,12 +368,19 @@ impl BlockEditor {
             InputEvent::Change => self.on_change(window, cx),
             // Clicking another block refocuses the same input; only a real focus loss ends
             // editing.
-            InputEvent::Blur => cx.defer_in(window, |this, window, cx| {
-                if !this.input.focus_handle(cx).is_focused(window) {
-                    this.deactivate(cx);
-                }
-            }),
+            InputEvent::Blur => cx.defer_in(window, Self::deactivate_if_unfocused),
             _ => {}
+        }
+    }
+}
+
+impl BlockEditor {
+    /// After a blur: editing ends unless focus is still in the block or its `/` menu.
+    fn deactivate_if_unfocused(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.input.focus_handle(cx).is_focused(window)
+            && !self.slash_input.focus_handle(cx).is_focused(window)
+        {
+            self.deactivate(cx);
         }
     }
 }
@@ -384,6 +439,15 @@ impl Render for BlockEditor {
                     .on_click(cx.listener(|this, _, window, cx| this.click_tail(window, cx))),
             )
             .children(self.render_block_menu())
+    }
+}
+
+/// Hint in an empty block of `kind` being edited.
+fn placeholder(kind: &Kind) -> &'static str {
+    match kind {
+        Kind::Paragraph => "Type ‘/’ for commands",
+        Kind::Table => "",
+        kind => kind_label(kind),
     }
 }
 

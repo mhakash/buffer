@@ -66,6 +66,7 @@ fn preview_label(block: &Block) -> SharedString {
             format!("Block · {name}").into()
         }
         Kind::Code(_) => "Code".into(),
+        Kind::Table => "Table".into(),
         Kind::Raw => "Markdown".into(),
         _ => {
             let line = block.text.lines().next().unwrap_or("").trim();
@@ -116,7 +117,7 @@ impl BlockEditor {
                 // Not also a click on the block underneath (which would start editing it).
                 cx.stop_propagation();
                 if let Some(ix) = this.index_of(id) {
-                    this.open_block_menu(ix, event.position(), window, cx);
+                    this.open_block_menu(ix, event.position(), None, window, cx);
                 }
             }))
             .into_any_element()

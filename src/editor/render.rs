@@ -52,7 +52,7 @@ fn space_above(kind: &Kind, first: bool, compact: bool) -> f32 {
         Kind::Heading(1) => 20.,
         Kind::Heading(2) => 14.,
         Kind::Heading(_) => 10.,
-        Kind::Code(_) | Kind::Raw | Kind::Divider => 6.,
+        Kind::Code(_) | Kind::Raw | Kind::Divider | Kind::Table => 6.,
         _ => 1.,
     };
     if compact {
@@ -109,7 +109,7 @@ impl BlockEditor {
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     if let Some(ix) = this.index_of(id) {
-                        this.open_block_menu(ix, event.position, window, cx);
+                        this.open_block_menu(ix, event.position, None, window, cx);
                     }
                 }),
             );
@@ -162,6 +162,9 @@ impl BlockEditor {
     /// The block's text: the textarea when active, else rendered Markdown.
     fn render_body(&self, ix: usize, theme: &Theme, cx: &Context<Self>) -> AnyElement {
         let block = &self.doc.blocks[ix];
+        if block.kind == Kind::Table {
+            return self.render_table(ix, theme, cx);
+        }
         let id = block.id;
         let kind = &block.kind;
         let compact = self.compact;

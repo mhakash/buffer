@@ -144,13 +144,13 @@ edit it; URL values get an open button; hover a row to remove it.
 ### Block editor
 
 Notes and task notes share one editor. Every paragraph, heading, list item, to-do, quote, code
-fence and divider is a block. Blocks show
+fence, table and divider is a block. Blocks show
 formatted; click one to edit it (its inline Markdown — `**bold**`, links — shows while editing).
 Untouched blocks are saved byte for byte, so the file stays yours.
 
 | Input | Effect |
 |---|---|
-| `/` in an empty block | Block menu (type to filter, ↑↓ Enter); also the + handle on hover |
+| `/` in an empty block | Block menu with its own search field (type to filter, ↑↓/Tab Enter; Esc, a space or no match puts `/…` back as text; Backspace on an empty search drops the `/`); also the + handle on hover |
 | `# ` `## ` `### ` · `- ` · `1. ` · `[] ` · `> ` · ```` ``` ```` · `---` | Turn the block into heading · bullet · numbered · to-do · quote · code · divider |
 | Enter / ⇧Enter | New block (lists continue; Enter on an empty item leaves the list) / line break |
 | Backspace at start | Turn into text, then join with the block above |
@@ -164,6 +164,7 @@ Untouched blocks are saved byte for byte, so the file stays yours.
 | ⌘Z / ⌘⇧Z | Undo / redo (typing in the open block first, then block changes) |
 | Drag ⋮⋮ | Move the block (or the whole selection); a line shows where it lands |
 | Click ⋮⋮ or right-click a block | Turn into, copy, duplicate, move up/down, delete |
+| Table (`/table`, or any GFM table) | Click a cell to edit it; Tab / ⇧Tab and ←→ at an edge walk cells (Tab past the last adds a row); ↑↓ change rows; Enter goes down (adds a row at the bottom); ⌘Enter leaves. Hover + bars add a row / column; right-click a cell to insert or delete rows and columns. Saved as a padded GFM table, column alignment kept |
 
 ## Markdown extras
 

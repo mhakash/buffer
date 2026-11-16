@@ -52,7 +52,7 @@ impl BlockEditor {
     /// in between; a single block is left to the textarea (pasted as text).
     pub(super) fn paste_into_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(ix) = self.active else { return };
-        if !self.doc.blocks[ix].kind.is_text() {
+        if self.slash.is_some() || !self.doc.blocks[ix].kind.is_text() {
             return;
         }
         let text = cx

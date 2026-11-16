@@ -63,8 +63,12 @@ impl BlockEditor {
                 this.sel_escape(cx);
             }
         }))
-        .capture_action(cx.listener(|this, _: &IndentInline, _, cx| this.indent_key(1, cx)))
-        .capture_action(cx.listener(|this, _: &OutdentInline, _, cx| this.indent_key(-1, cx)))
+        .capture_action(
+            cx.listener(|this, _: &IndentInline, window, cx| this.indent_key(1, window, cx)),
+        )
+        .capture_action(
+            cx.listener(|this, _: &OutdentInline, window, cx| this.indent_key(-1, window, cx)),
+        )
         .capture_action(cx.listener(|this, _: &SelectAll, window, cx| {
             if this.editing() {
                 this.edit_select_all(window, cx);
@@ -137,9 +141,9 @@ impl BlockEditor {
         }
     }
 
-    fn indent_key(&mut self, step: isize, cx: &mut Context<Self>) {
+    fn indent_key(&mut self, step: isize, window: &mut Window, cx: &mut Context<Self>) {
         if self.editing() {
-            self.edit_indent(step, cx);
+            self.edit_indent(step, window, cx);
         } else if let Some(sel) = self.selection {
             cx.stop_propagation();
             self.indent_range(sel.range(), step, cx);
@@ -157,7 +161,8 @@ impl BlockEditor {
     /// ⌘Z / ⌘⇧Z: the textarea undoes its own typing first; structural changes and edits to
     /// blocks already left come from the editor's history.
     fn history_key(&mut self, redo: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if self.editing() && self.typed {
+        // The textarea (or the `/` search field) undoes its own typing first.
+        if self.editing() && (self.typed || self.slash.is_some()) {
             return;
         }
         cx.stop_propagation();

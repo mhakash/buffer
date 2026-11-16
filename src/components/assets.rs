@@ -7,6 +7,10 @@ icon_assets!(
     ExtraIcons,
     [
         ArrowLeft,
+        BetweenHorizontalEnd,
+        BetweenHorizontalStart,
+        BetweenVerticalEnd,
+        BetweenVerticalStart,
         Brain,
         Braces,
         Calendar,
@@ -47,6 +51,7 @@ icon_assets!(
         Sparkles,
         SquarePen,
         StickyNote,
+        Table,
         Sun,
         Tags,
         Target,
@@ -163,6 +168,11 @@ mod tests {
             IconName::RefreshCw,
             IconName::ChevronDown,
             IconName::ChevronRight,
+            IconName::Table,
+            IconName::BetweenHorizontalStart,
+            IconName::BetweenHorizontalEnd,
+            IconName::BetweenVerticalStart,
+            IconName::BetweenVerticalEnd,
         ] {
             let bytes = Assets.load(&name.path()).unwrap().unwrap();
             assert!(std::str::from_utf8(&bytes).unwrap().contains("<svg"));

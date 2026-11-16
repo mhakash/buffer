@@ -17,7 +17,9 @@ pub enum Kind {
     /// Fenced code; the string is the info string (language), e.g. `mermaid`.
     Code(String),
     Divider,
-    /// Anything else (tables, HTML, frontmatter): shown rendered, edited as Markdown.
+    /// A Markdown table (GFM pipes); the text is its source, cells via `Table`.
+    Table,
+    /// Anything else (HTML, frontmatter, malformed tables): shown rendered, edited as Markdown.
     Raw,
 }
 
@@ -28,7 +30,10 @@ impl Kind {
 
     /// Edited as inline Markdown with the block's own marker drawn by the editor.
     pub fn is_text(&self) -> bool {
-        !matches!(self, Kind::Code(_) | Kind::Divider | Kind::Raw)
+        !matches!(
+            self,
+            Kind::Code(_) | Kind::Divider | Kind::Table | Kind::Raw
+        )
     }
 }
 
@@ -74,6 +79,15 @@ impl Block {
             if kind == Kind::Divider {
                 self.text.clear();
             }
+            if kind == Kind::Table {
+                // Any text becomes a valid table (a line per row); nothing, a 3×3 one.
+                let table = if self.text.trim().is_empty() {
+                    Table::new(3, 3)
+                } else {
+                    Table::parse(&self.text)
+                };
+                self.text = table.to_markdown();
+            }
             self.kind = kind;
             self.src = None;
         }
@@ -102,7 +116,7 @@ impl Block {
             format!("{pad}{marker}{}", self.text.replace('\n', &cont))
         };
         match &self.kind {
-            Kind::Paragraph | Kind::Raw => self.text.clone(),
+            Kind::Paragraph | Kind::Table | Kind::Raw => self.text.clone(),
             Kind::Heading(level) => format!(
                 "{} {}",
                 "#".repeat(*level as usize),
@@ -380,7 +394,13 @@ pub fn parse(text: &str) -> Doc {
             while i < lines.len() && !lines[i].trim().is_empty() {
                 i += 1;
             }
-            (Kind::Raw, 0, lines[start..i].join("\n"))
+            let table = line.trim_start().starts_with('|')
+                && lines[start..i]
+                    .iter()
+                    .all(|l| l.trim_start().starts_with('|'))
+                && lines.get(start + 1).is_some_and(|l| is_delimiter_row(l));
+            let kind = if table { Kind::Table } else { Kind::Raw };
+            (kind, 0, lines[start..i].join("\n"))
         } else {
             while i < lines.len() && !lines[i].trim().is_empty() && !starts_block(lines[i]) {
                 i += 1;
@@ -398,6 +418,193 @@ pub fn parse(text: &str) -> Doc {
         doc.tail = "\n".repeat(blank);
     }
     doc
+}
+
+/// Cells of a `Kind::Table` block. Rows are rectangular; row 0 is the header.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Table {
+    pub rows: Vec<Vec<String>>,
+    /// Delimiter cell per column (`---`, `:--`, `--:`, `:-:`), so alignment survives edits.
+    delims: Vec<String>,
+}
+
+/// Cells of a table row: outer pipes dropped, split on unescaped `|`, `\|` unescaped.
+fn split_row(line: &str) -> Vec<String> {
+    let t = line.trim();
+    let t = t.strip_prefix('|').unwrap_or(t);
+    let t = match t.strip_suffix('|') {
+        Some(rest) if !rest.ends_with('\\') => rest,
+        _ => t,
+    };
+    let mut cells = vec![String::new()];
+    let mut chars = t.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.peek() == Some(&'|') => {
+                chars.next();
+                cells.last_mut().unwrap().push('|');
+            }
+            '|' => cells.push(String::new()),
+            c => cells.last_mut().unwrap().push(c),
+        }
+    }
+    cells.into_iter().map(|c| c.trim().to_string()).collect()
+}
+
+fn is_delimiter_cell(cell: &str) -> bool {
+    let d = cell.trim();
+    let d = d.strip_prefix(':').unwrap_or(d);
+    let d = d.strip_suffix(':').unwrap_or(d);
+    !d.is_empty() && d.chars().all(|c| c == '-')
+}
+
+/// `|---|:-:|` under a table's header.
+fn is_delimiter_row(line: &str) -> bool {
+    line.contains('-') && split_row(line).iter().all(|c| is_delimiter_cell(c))
+}
+
+impl Table {
+    /// `cols` columns, a header and `rows - 1` body rows, all empty.
+    pub fn new(rows: usize, cols: usize) -> Self {
+        Self {
+            rows: vec![vec![String::new(); cols.max(1)]; rows.max(1)],
+            delims: Vec::new(),
+        }
+    }
+
+    /// Lenient: any text is a table (a line per row); a delimiter row after the first is
+    /// skipped.
+    pub fn parse(text: &str) -> Self {
+        let mut delims = Vec::new();
+        let mut rows = Vec::new();
+        for (i, line) in text.lines().filter(|l| !l.trim().is_empty()).enumerate() {
+            if i == 1 && is_delimiter_row(line) {
+                delims = split_row(line);
+                continue;
+            }
+            rows.push(split_row(line));
+        }
+        if rows.is_empty() {
+            rows.push(vec![String::new()]);
+        }
+        let cols = rows.iter().map(Vec::len).max().unwrap_or(1);
+        for row in &mut rows {
+            row.resize(cols, String::new());
+        }
+        Self { rows, delims }
+    }
+
+    pub fn cols(&self) -> usize {
+        self.rows[0].len()
+    }
+
+    pub fn cell(&self, row: usize, col: usize) -> &str {
+        self.rows
+            .get(row)
+            .and_then(|r| r.get(col))
+            .map_or("", String::as_str)
+    }
+
+    /// Set a cell; it stays on one line.
+    pub fn set_cell(&mut self, row: usize, col: usize, text: &str) {
+        if let Some(cell) = self.rows.get_mut(row).and_then(|r| r.get_mut(col)) {
+            *cell = text.replace(['\r', '\n'], " ");
+        }
+    }
+
+    pub fn insert_row(&mut self, at: usize) {
+        let at = at.min(self.rows.len());
+        self.rows.insert(at, vec![String::new(); self.cols()]);
+    }
+
+    pub fn insert_col(&mut self, at: usize) {
+        let at = at.min(self.cols());
+        for row in &mut self.rows {
+            row.insert(at, String::new());
+        }
+        if at <= self.delims.len() {
+            self.delims.insert(at, "---".into());
+        }
+    }
+
+    /// The last row and column stay.
+    pub fn remove_row(&mut self, at: usize) {
+        if self.rows.len() > 1 && at < self.rows.len() {
+            self.rows.remove(at);
+        }
+    }
+
+    pub fn remove_col(&mut self, at: usize) {
+        if self.cols() > 1 && at < self.cols() {
+            for row in &mut self.rows {
+                row.remove(at);
+            }
+            if at < self.delims.len() {
+                self.delims.remove(at);
+            }
+        }
+    }
+
+    /// GFM with columns padded to line up.
+    pub fn to_markdown(&self) -> String {
+        let cols = self.cols();
+        let escaped: Vec<Vec<String>> = self
+            .rows
+            .iter()
+            .map(|r| r.iter().map(|c| c.replace('|', "\\|")).collect())
+            .collect();
+        let delims: Vec<&str> = (0..cols)
+            .map(|c| {
+                self.delims
+                    .get(c)
+                    .map(|d| d.as_str())
+                    .filter(|d| is_delimiter_cell(d))
+                    .unwrap_or("---")
+            })
+            .collect();
+        let widths: Vec<usize> = (0..cols)
+            .map(|c| {
+                escaped
+                    .iter()
+                    .map(|r| r[c].chars().count())
+                    .chain([3])
+                    .max()
+                    .unwrap_or(3)
+            })
+            .collect();
+        let line = |cells: Vec<String>| format!("| {} |", cells.join(" | "));
+        let pad = |s: &str, w: usize| format!("{s}{}", " ".repeat(w - s.chars().count()));
+        let delim = |d: &str, w: usize| {
+            let (l, r) = (d.starts_with(':'), d.len() > 1 && d.ends_with(':'));
+            let dashes = w - usize::from(l) - usize::from(r);
+            format!(
+                "{}{}{}",
+                if l { ":" } else { "" },
+                "-".repeat(dashes),
+                if r { ":" } else { "" }
+            )
+        };
+        let mut out = vec![line(
+            escaped[0]
+                .iter()
+                .zip(&widths)
+                .map(|(c, w)| pad(c, *w))
+                .collect(),
+        )];
+        out.push(line(
+            delims
+                .iter()
+                .zip(&widths)
+                .map(|(d, w)| delim(d, *w))
+                .collect(),
+        ));
+        for row in &escaped[1..] {
+            out.push(line(
+                row.iter().zip(&widths).map(|(c, w)| pad(c, *w)).collect(),
+            ));
+        }
+        out.join("\n")
+    }
 }
 
 /// Markdown typed at the start of a paragraph (Notion shortcuts): the kind it turns into and
@@ -527,7 +734,7 @@ mod tests {
                 (Kind::Quote, 0),
                 (Kind::Code("rust".into()), 0),
                 (Kind::Divider, 0),
-                (Kind::Raw, 0),
+                (Kind::Table, 0),
                 (Kind::Paragraph, 0),
             ]
         );
@@ -645,5 +852,34 @@ mod tests {
         assert_eq!(toggle_mark("a **b** c", 4..5, "**"), ("a b c".into(), 2..3));
         assert_eq!(toggle_mark("a **b** c", 2..7, "**"), ("a b c".into(), 2..3));
         assert_eq!(toggle_mark("ab", 1..1, "_"), ("a__b".into(), 2..2));
+    }
+
+    #[test]
+    fn tables() {
+        let t = Table::parse("| a | b \\| c |\n|:--|--:|\n| 1 |\n");
+        assert_eq!(t.rows, [vec!["a", "b | c"], vec!["1", ""]]);
+        assert_eq!(
+            t.to_markdown(),
+            "| a   | b \\| c |\n| :-- | -----: |\n| 1   |        |"
+        );
+        let mut t = Table::parse("hello");
+        assert_eq!(t.rows, [vec!["hello"]]);
+        t.insert_col(1);
+        t.insert_row(1);
+        t.set_cell(1, 1, "x\ny");
+        assert_eq!(t.cell(1, 1), "x y");
+        t.remove_col(0);
+        t.remove_row(0);
+        assert_eq!(t.rows, [vec!["x y"]]);
+        t.remove_row(0);
+        assert_eq!(t.rows.len(), 1, "the last row stays");
+        assert_eq!(
+            parse("| a |\n| b |").blocks[0].kind,
+            Kind::Raw,
+            "no delimiter row"
+        );
+        let mut doc = parse("text");
+        doc.blocks[0].set_kind(Kind::Table);
+        assert_eq!(doc.to_markdown(), "| text |\n| ---- |");
     }
 }

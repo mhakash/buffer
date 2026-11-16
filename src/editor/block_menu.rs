@@ -12,7 +12,9 @@ use gpui_kit::{
     Point, Subscription, WeakEntity, Window, anchored, assets::IconName, deferred, prelude::*, px,
 };
 
-use super::{BlockEditor, Caret, model::Kind, selection::Selection, slash::block_types};
+use super::{
+    BlockEditor, Caret, model::Kind, selection::Selection, slash::block_types, table::cell_edits,
+};
 use crate::blocks::{
     self,
     model::{fence_type, parse_config},
@@ -31,6 +33,7 @@ impl BlockEditor {
         &mut self,
         ix: usize,
         position: Point<Pixels>,
+        cell: Option<(usize, usize)>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -42,11 +45,13 @@ impl BlockEditor {
         // the meta line under it far away.
         let custom = range.len() == 1
             && matches!(&self.doc.blocks[range.start].kind, Kind::Code(lang) if fence_type(lang).is_some());
+        // A right-click on a table cell adds row and column edits.
+        let cell = cell.filter(|_| range.len() == 1);
         self.select(Selection::span(range.clone()), window, cx);
         let ids: Vec<u64> = self.doc.blocks[range].iter().map(|b| b.id).collect();
         let this = cx.entity().downgrade();
         let menu = PopupMenu::build(window, cx, move |menu, window, cx| {
-            build(menu, this, ids, custom, window, cx)
+            build(menu, this, ids, custom, cell, window, cx)
         });
         let dismiss = cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, window, cx| {
             this.block_menu = None;
@@ -85,6 +90,7 @@ fn build(
     this: WeakEntity<BlockEditor>,
     ids: Vec<u64>,
     custom: bool,
+    cell: Option<(usize, usize)>,
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
@@ -131,6 +137,24 @@ fn build(
         .separator()
     } else {
         menu
+    };
+    let menu = match cell {
+        Some((row, col)) => {
+            let mut menu = menu;
+            for (label, icon, edit) in cell_edits() {
+                let (this, id) = (this.clone(), ids[0]);
+                menu = menu.item(PopupMenuItem::new(label).icon(Icon::new(icon)).on_click(
+                    move |_, _, cx| {
+                        this.update(cx, |editor, cx| {
+                            editor.edit_table(id, |t| edit(t, row, col), cx);
+                        })
+                        .ok();
+                    },
+                ));
+            }
+            menu.separator()
+        }
+        None => menu,
     };
     let (turn_this, turn_ids) = (this.clone(), ids.clone());
     menu.submenu("Turn into", window, cx, move |mut menu, _, _| {
