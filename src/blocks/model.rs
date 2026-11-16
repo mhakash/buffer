@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-/// Fence info string prefix: ```` ```block jira ````.
+/// Fence info string prefix: ```` ```block report ````.
 pub const FENCE: &str = "block";
 
 /// A programmatic block: a script whose stdout (Markdown) is shown in place of the fence.
@@ -89,7 +89,22 @@ impl ParamKind {
     }
 }
 
+/// Script a new block type starts with (Python; uses the `who` param of [`BlockType::blank`]).
+pub const STARTER_SCRIPT: &str = include_str!("starter.py");
+
 impl BlockType {
+    /// A new block type: [`STARTER_SCRIPT`] and the one param it uses.
+    pub fn blank() -> Self {
+        Self {
+            params: vec![Param {
+                name: "who".into(),
+                kind: ParamKind::Text,
+                default: "world".into(),
+            }],
+            ..Default::default()
+        }
+    }
+
     pub fn label(&self) -> &str {
         if self.label.is_empty() {
             &self.name
@@ -145,7 +160,7 @@ pub fn valid_name(name: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
 }
 
-/// The block type a fence info string names (`block jira` → `jira`).
+/// The block type a fence info string names (`block report` → `report`).
 pub fn fence_type(info: &str) -> Option<&str> {
     let rest = info.trim().strip_prefix(FENCE)?;
     if !rest.starts_with(char::is_whitespace) {
@@ -250,9 +265,9 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn jira() -> BlockType {
+    fn sample() -> BlockType {
         BlockType {
-            name: "jira".into(),
+            name: "report".into(),
             params: vec![
                 Param {
                     name: "jql".into(),
@@ -276,11 +291,11 @@ mod tests {
 
     #[test]
     fn fence_types() {
-        assert_eq!(fence_type("block jira"), Some("jira"));
+        assert_eq!(fence_type("block report"), Some("report"));
         assert_eq!(fence_type("  block   my-list_2  extra"), Some("my-list_2"));
         assert_eq!(fence_type("block"), None);
-        assert_eq!(fence_type("blockjira"), None);
-        assert_eq!(fence_type("block Jira"), None);
+        assert_eq!(fence_type("blockreport"), None);
+        assert_eq!(fence_type("block Report"), None);
         assert_eq!(fence_type("block ../x"), None);
         assert_eq!(fence_type("mermaid"), None);
     }
@@ -303,12 +318,12 @@ mod tests {
     #[test]
     fn input_converts_params_and_keeps_extra_keys() {
         let config = parse_config("limit: 5\ndone: yes\nextra: z");
-        let input = Value::Object(jira().input(&config));
+        let input = Value::Object(sample().input(&config));
         assert_eq!(
             input,
             json!({"jql": "assignee = currentUser()", "limit": 5, "done": true, "extra": "z"})
         );
-        let input = Value::Object(jira().input(&parse_config("limit: lots")));
+        let input = Value::Object(sample().input(&parse_config("limit: lots")));
         assert_eq!(input["limit"], json!("lots"));
         assert_eq!(input["done"], json!(false));
     }
@@ -316,24 +331,24 @@ mod tests {
     #[test]
     fn starter_lists_defaults() {
         assert_eq!(
-            jira().starter(),
+            sample().starter(),
             "jql: assignee = currentUser()\nlimit: 10\ndone: no"
         );
     }
 
     #[test]
     fn keys_are_stable_and_distinguish() {
-        let ty = jira();
+        let ty = sample();
         let a = parse_config("limit: 5");
         assert_eq!(ty.key(&a), ty.key(&parse_config("# c\nlimit:5")));
         assert_ne!(ty.key(&a), ty.key(&parse_config("limit: 6")));
         let bumped = BlockType {
             revision: 1,
-            ..jira()
+            ..sample()
         };
         assert_ne!(ty.key(&a), bumped.key(&a));
         // Pinned: cache file names must not change between builds.
-        assert_eq!(ty.key(&Config::new()), "e6da28df2b298b83");
+        assert_eq!(ty.key(&Config::new()), "2fa63bf2ce805ed1");
     }
 
     #[test]

@@ -20,8 +20,10 @@ use gpui_kit::{
 use crate::{
     blocks::{
         self, Blocks,
-        model::{BlockType, FENCE, Output, Param, ParamKind, parse_config, valid_name},
-        store, templates,
+        model::{
+            BlockType, FENCE, Output, Param, ParamKind, STARTER_SCRIPT, parse_config, valid_name,
+        },
+        store,
     },
     components::{
         confirm::{confirm, confirm_delete},
@@ -326,20 +328,16 @@ impl BlocksPage {
         );
     }
 
-    /// A new, unsaved block from `templates::all()[template]`.
-    fn create(&mut self, template: usize, window: &mut Window, cx: &mut Context<Self>) {
-        self.leave(window, cx, move |this, window, cx| {
-            let Some(t) = templates::all().into_iter().nth(template) else {
-                return;
-            };
-            let mut ty = t.ty;
-            ty.name = t.name.to_string();
-            let mut n = 2;
-            while !ty.name.is_empty() && store::exists(&ty.name) {
-                ty.name = format!("{}-{n}", t.name);
-                n += 1;
-            }
-            this.load(ty, t.script.to_string(), true, window, cx);
+    /// A new, unsaved block type with a starter script.
+    fn create(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.leave(window, cx, |this, window, cx| {
+            this.load(
+                BlockType::blank(),
+                STARTER_SCRIPT.to_string(),
+                true,
+                window,
+                cx,
+            );
             if let Some(d) = &this.draft {
                 d.name.update(cx, |n, cx| n.focus(window, cx));
             }
@@ -503,21 +501,7 @@ impl BlocksPage {
                     theme.muted_foreground,
                     "New block",
                 )
-                .dropdown_menu({
-                    let this = cx.entity().downgrade();
-                    move |mut menu, _, _| {
-                        menu = menu.label("New block from");
-                        for (ix, t) in templates::all().into_iter().enumerate() {
-                            let this = this.clone();
-                            menu = menu.item(PopupMenuItem::new(t.label).on_click(
-                                move |_, window, cx| {
-                                    this.update(cx, |this, cx| this.create(ix, window, cx)).ok();
-                                },
-                            ));
-                        }
-                        menu
-                    }
-                }),
+                .on_click(cx.listener(|this, _, window, cx| this.create(window, cx))),
             );
 
         let row =
@@ -1031,10 +1015,10 @@ impl BlocksPage {
                     .text_color(theme.muted_foreground)
                     .child(
                         "A block runs a script and shows its Markdown in your notes — \
-                         a Jira query, a report, anything. Click to make one.",
+                         a report, a status check, anything. Click to make one.",
                     ),
             )
-            .on_click(cx.listener(|this, _, window, cx| this.create(0, window, cx)))
+            .on_click(cx.listener(|this, _, window, cx| this.create(window, cx)))
     }
 }
 

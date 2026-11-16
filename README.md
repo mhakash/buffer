@@ -6,7 +6,7 @@ Desktop app for custom work tooling, built on [GPUI](https://gpui.rs/) (Zed's UI
 [GPUI Kit](https://gpui-kit.com) (GPUI + ready-made components, Lucide icons, JSON themes).
 Aurora-styled UI (drifting glow, springy nav, animated progress) with a task list, a daily
 dashboard (greeting, streak, 7-day chart, progress ring), standalone Markdown notes with custom
-script-driven blocks (e.g. live Jira lists) and a pomodoro Focus timer.
+script-driven blocks and a pomodoro Focus timer.
 
 ## Install / update
 
@@ -180,13 +180,13 @@ Click a diagram, or an image on its own line, to open it full-window; click or E
 
 ## Custom blocks
 
-A custom block runs a script and shows the Markdown it prints, e.g. your open Jira tickets. Make one
-on the **Blocks** page (⌘4): + → Blank or Jira tickets, fill in the form, Save. Use it in a note by
-typing `/` and picking it under Custom, or by writing a fence:
+A custom block runs a script and shows the Markdown it prints. Make one on the **Blocks** page (⌘4):
++ starts a block with a Python starter script; fill in the form, Save. Use it in a note by typing `/`
+and picking it under Custom, or by writing a fence:
 
 ````markdown
-```block jira
-jql: project = PP AND resolution = Unresolved
+```block report
+since: 7d
 limit: 5
 ```
 ````
@@ -199,10 +199,6 @@ limit: 5
 | Refresh | Output is cached; a block older than its **Fresh for** seconds re-runs when shown (0 = never); hover → ↻ re-runs now. **Timeout** kills the script and anything it started |
 | Trust | Off per workspace until you click **Allow…** on a block (or Settings → Workspaces → Run block scripts). Test runs on the Blocks page always run |
 | Saving | Explicit (Save). Every save re-runs that type's blocks; editing the script outside the app doesn't, so use ↻ |
-
-Jira template: Server/Data Center by default (bearer personal access token on `/rest/api/2/search`);
-for Jira Cloud set `JIRA_URL` to `https://<site>.atlassian.net` and add `JIRA_EMAIL` (API token as
-`JIRA_TOKEN`). Store the token with `security add-generic-password -s buffer-jira -a $USER -w`.
 
 ## Look
 
@@ -234,7 +230,7 @@ pulsing indicators (saves battery). macOS "Reduce motion" is honoured by every a
 | `src/focus/` | `FocusTimer` entity (pomodoro state, `focus.json`) |
 | `src/notes/` | `NoteStore` entity (`notes.json` + `notes/<id>.md`) |
 | `src/editor/` | Block editor for notes and task notes; `mod.rs` lists its files |
-| `src/blocks/` | Custom blocks: model + fence config, store, script runner, cache/trust, templates; `mod.rs` lists its files |
+| `src/blocks/` | Custom blocks: model + fence config, store, script runner, cache/trust, starter script; `mod.rs` lists its files |
 | `src/net.rs` | HTTP client GPUI uses for remote images |
 | `src/quotes.rs` | Daily sidebar line + time-of-day greeting |
 | `themes/buffer.json` | Light + dark palettes (hot-reloaded in debug builds) |

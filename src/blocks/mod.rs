@@ -7,7 +7,6 @@
 //! | `model` | block type, fence config, output (pure, tested) |
 //! | `store` | files on disk |
 //! | `runner` | running a script (blocking, tested) |
-//! | `templates` | starting points for new block types (scripts in `templates/`) |
 //!
 //! Scripts run only in workspaces that allowed them (`workspaces::blocks_trusted`); until then
 //! cards show cached output and an Allow button.
@@ -18,7 +17,6 @@
 pub mod model;
 pub mod runner;
 pub mod store;
-pub mod templates;
 
 use std::{
     collections::{HashMap, HashSet},

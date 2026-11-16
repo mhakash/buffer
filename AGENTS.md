@@ -120,3 +120,4 @@ Screenshots are in pixels (2× on Retina): global point = window origin + pixel 
 - Don't add other UI libraries alongside gpui-kit, a direct `gpui` dependency, or git dependencies without asking — they must match the kit's pinned GPUI.
 - Don't edit `Cargo.lock` by hand; don't commit `target/`.
 - Don't add clutter: the user explicitly wants a minimal UI. Secondary actions go on hover, not always-visible.
+- Don't build features for one service or vendor (Jira, GitLab, …) into the app when the user names one as an example: build the general mechanism (e.g. custom blocks) and leave specific integrations to user content.
