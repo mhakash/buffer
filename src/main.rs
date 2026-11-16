@@ -1,4 +1,5 @@
 mod actions;
+mod blocks;
 mod components;
 mod editor;
 mod focus;

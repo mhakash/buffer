@@ -37,6 +37,7 @@ tasks/         model.rs (Task + Subtask/Link/LogEntry, parse_quick_add, streak s
 pages/task_detail.rs  side panel / full page (`full_page`); Workspace sizes it (`prefs.detail_width`, `ResizePanel` drag)
 focus/         FocusTimer entity (pomodoro, focus.json)
 notes/         NoteStore entity (notes.json index + notes/<id>.md; first line = title via split/compose); pages/notes.rs = list + document panes, fills the content area itself (Workspace skips the max-width wrapper)
+blocks/        programmatic blocks: ```` ```block <name> ```` fence → script in `blocks/<name>/` (workspace) → Markdown, cached in `.cache/blocks/`; `Blocks` global (reloaded in `Content::load`), runs on a thread via login shell; table in `blocks/mod.rs`
 editor/        Notion-style block editor used by notes and task notes (`load(md, image dir)`, `set_compact` for the side panel); one file per concern, table in `editor/mod.rs`. `model.rs` = Markdown ⇄ blocks (untouched blocks keep their source); owns its key bindings (`editor::init`)
 pages/         one Render view per sidebar page; Page enum lists them. task_detail.rs = right panel owned by Workspace; pages `cx.emit(OpenTask(id))`, Workspace subscribes and opens it
 components/    thin fn wrappers over kit components + icon Assets; fx.rs = glow/gradient/ring/animations; markdown.rs = `markdown_view` (always use it for Markdown: Mermaid + frontmatter + clickable-image plugins, image resolver); lightbox.rs = full-window image view (Global; Workspace renders it last and routes keys via `capture_key`)

@@ -103,6 +103,12 @@ pub fn save_app<T: Serialize>(file: &str, value: &T) -> anyhow::Result<()> {
     write_atomic(&app_dir().join(file), &serde_json::to_vec_pretty(value)?)
 }
 
+/// [`save`] to a path resolved earlier with [`path`], for writes that finish on another thread
+/// after the active workspace may have changed.
+pub fn save_at<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
+    write_atomic(path, &serde_json::to_vec_pretty(value)?)
+}
+
 fn load_from<T: DeserializeOwned + Default>(path: &Path) -> T {
     match fs::read(path) {
         Ok(bytes) => match serde_json::from_slice(&bytes) {
@@ -159,6 +165,20 @@ pub fn remove_dir(dir: &str) -> anyhow::Result<()> {
         }
         _ => Ok(()),
     }
+}
+
+/// Names of the subfolders of `dir`, sorted; missing → none.
+pub fn list_dirs(dir: &str) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(path(dir)) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    names.sort();
+    names
 }
 
 /// Copies `from` to `to` (both relative to the data dir).

@@ -77,6 +77,7 @@ struct Content {
 
 impl Content {
     fn load(window: &mut Window, cx: &mut Context<Workspace>) -> Self {
+        crate::blocks::load(cx);
         let store = cx.new(TaskStore::load);
         let timer = cx.new(FocusTimer::load);
         let tasks = cx.new(|cx| TasksPage::new(store.clone(), window, cx));
