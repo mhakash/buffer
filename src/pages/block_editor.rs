@@ -23,8 +23,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnyElement, Bounds, Context, Entity, EventEmitter, Focusable, FontWeight, Hsla, Modifiers,
-    MouseButton, MouseDownEvent, MouseUpEvent, Pixels, PlatformInput, Point, Subscription, Window,
-    anchored, assets::IconName, canvas, deferred, div, point, prelude::*, px,
+    MouseButton, MouseDownEvent, MouseUpEvent, Pixels, PlatformInput, Point, ScrollHandle,
+    Subscription, Window, anchored, assets::IconName, canvas, deferred, div, point, prelude::*, px,
 };
 
 use crate::{
@@ -37,7 +37,7 @@ use crate::{
 };
 
 /// Room left of the text for the hover handles (inside the document padding).
-const GUTTER: f32 = 50.;
+const GUTTER: f32 = 48.;
 const INDENT: f32 = 24.;
 const MARKER_W: f32 = 24.;
 
@@ -165,6 +165,7 @@ pub struct BlockEditor {
     input: Entity<TextareaState>,
     /// Highlighted row of the open `/` menu.
     menu: Option<usize>,
+    menu_scroll: ScrollHandle,
     /// Where the active textarea was laid out, for replaying the click that opened it.
     active_bounds: Rc<Cell<Bounds<Pixels>>>,
     _subscriptions: Vec<Subscription>,
@@ -182,6 +183,7 @@ impl BlockEditor {
             input,
             menu: None,
             active_bounds: Rc::default(),
+            menu_scroll: ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -228,7 +230,7 @@ impl BlockEditor {
             return;
         }
         self.active = Some(ix);
-        self.menu = slash_query(&block.text).map(|_| 0);
+        self.menu = None;
         let text = block.text.clone();
         let offset = match caret {
             Caret::Start => 0,
@@ -342,12 +344,14 @@ impl BlockEditor {
             self.convert(ix, new_kind, rest, window, cx);
             return;
         }
+        // Open when typing starts a `/query`; stay open (back at the top) while it's refined.
+        // Esc or leaving the block dismisses it until a new `/` is typed.
+        let was_query = slash_query(&self.doc.blocks[ix].text).is_some();
+        let open =
+            kind.is_text() && slash_query(&text).is_some() && (self.menu.is_some() || !was_query);
         self.doc.blocks[ix].set_text(text.clone());
-        self.menu = if kind.is_text() && slash_query(&text).is_some() {
-            Some(self.menu.unwrap_or(0))
-        } else {
-            None
-        };
+        self.menu = open.then_some(0);
+        self.menu_scroll.scroll_to_item(0);
         self.changed(cx);
     }
 
@@ -562,7 +566,10 @@ impl BlockEditor {
     fn move_menu(&mut self, step: isize, cx: &mut Context<Self>) -> bool {
         let Some(sel) = self.menu else { return false };
         let n = self.filtered_menu(cx).len().max(1) as isize;
-        self.menu = Some((sel as isize + step).rem_euclid(n) as usize);
+        let sel = (sel as isize + step).rem_euclid(n) as usize;
+        self.menu = Some(sel);
+        // Child 0 is the "Blocks" label.
+        self.menu_scroll.scroll_to_item(sel + 1);
         cx.notify();
         true
     }
@@ -740,12 +747,20 @@ impl BlockEditor {
         let block = self.doc.block(Kind::Paragraph, "/");
         self.doc.blocks.insert(ix + 1, block);
         self.activate(ix + 1, Caret::End, window, cx);
+        self.menu = Some(0);
         self.changed(cx);
     }
 
     // ---- rendering ----
 
-    fn render_handles(&self, id: u64, top: f32, theme: &Theme, cx: &Context<Self>) -> AnyElement {
+    fn render_handles(
+        &self,
+        id: u64,
+        left: f32,
+        top: f32,
+        theme: &Theme,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let this = cx.entity().downgrade();
         let muted = theme.muted_foreground;
         let add = Button::new(("blk-add", id))
@@ -822,7 +837,7 @@ impl BlockEditor {
             });
         h_flex()
             .absolute()
-            .left(px(-GUTTER))
+            .left(px(left))
             .top(px(top))
             .w(px(GUTTER - 4.))
             .justify_end()
@@ -905,6 +920,7 @@ impl BlockEditor {
             .w(px(240.))
             .max_h(px(320.))
             .overflow_y_scroll()
+            .track_scroll(&self.menu_scroll)
             .mt_1()
             .p_1()
             .rounded_xl()
@@ -944,6 +960,7 @@ impl BlockEditor {
         let (size, weight, line_h) = metrics(kind);
         let above = space_above(kind, ix == 0);
         let dir = NoteStore::dir();
+        let indent_x = block.indent as f32 * INDENT;
 
         let row = h_flex()
             .id(("blk-row", id))
@@ -951,14 +968,16 @@ impl BlockEditor {
             .relative()
             .items_start()
             .pt(px(above))
-            .pl(px(block.indent as f32 * INDENT));
+            // The row reaches into the gutter so hovering the handles keeps them shown.
+            .ml(px(-GUTTER))
+            .pl(px(GUTTER + block.indent as f32 * INDENT));
 
         if *kind == Kind::Divider {
             return row
                 .h(px(above + 25.))
                 .items_center()
                 .child(div().flex_1().h(px(1.)).bg(theme.border))
-                .child(self.render_handles(id, above, theme, cx))
+                .child(self.render_handles(id, indent_x, above, theme, cx))
                 .into_any_element();
         }
 
@@ -1050,7 +1069,7 @@ impl BlockEditor {
 
         let handle_top = above + if code_like { 4. } else { (line_h - 22.) / 2. };
         row.child(content)
-            .child(self.render_handles(id, handle_top, theme, cx))
+            .child(self.render_handles(id, indent_x, handle_top, theme, cx))
             .when(!active, |row| {
                 row.on_click(
                     cx.listener(move |this, event: &gpui_kit::ClickEvent, window, cx| {
