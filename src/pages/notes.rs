@@ -1,6 +1,6 @@
 //! Standalone Markdown notes, Notion-style: a list pane and a document pane that fill the
-//! content area. The title is always editable; the body is rendered Markdown until you edit
-//! it. Full view hides the list.
+//! content area. The title is always editable; the body is a Notion-style block editor
+//! (`block_editor`), or its Markdown source. Full view hides the list.
 
 use gpui_kit::component::{
     ActiveTheme, Icon, Sizable, Size, Theme,
@@ -15,12 +15,12 @@ use gpui_kit::{
     assets::IconName, div, prelude::*, px, rgb,
 };
 
-use super::task_detail::when;
+use super::{
+    block_editor::{BlockEditor, BlockEditorEvent},
+    task_detail::when,
+};
 use crate::{
-    components::{
-        category_tag, confirm::confirm_delete, document_style, icon_button, markdown_view,
-        property_row,
-    },
+    components::{category_tag, confirm::confirm_delete, icon_button, property_row},
     notes::{Note, NoteId, NoteStore},
     tasks::{TaskStore, is_url},
 };
@@ -35,8 +35,9 @@ pub struct NotesPage {
     /// Source of the tag list (shared task categories).
     tasks: Entity<TaskStore>,
     selected: Option<NoteId>,
-    /// Body shows the Markdown source instead of the rendered note.
-    editing: bool,
+    /// Body shows the Markdown source instead of the block editor.
+    source: bool,
+    blocks: Entity<BlockEditor>,
     /// List hidden, document takes the whole area.
     full: bool,
     title: Entity<InputState>,
@@ -64,6 +65,7 @@ impl NotesPage {
                 .placeholder("Write in Markdown: # headings, - [ ] checklists, `code`, links…")
         });
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search"));
+        let blocks = cx.new(|cx| BlockEditor::new(window, cx));
         let subscriptions = vec![
             // Keep a selection whenever there's a note (first launch, after a delete).
             cx.observe_in(&store, window, |this, _, window, cx| {
@@ -71,6 +73,19 @@ impl NotesPage {
                 cx.notify();
             }),
             cx.observe(&search, |_, _, cx| cx.notify()),
+            cx.subscribe_in(
+                &blocks,
+                window,
+                |this, _, event: &BlockEditorEvent, window, cx| match event {
+                    BlockEditorEvent::Changed(markdown) => {
+                        if let Some(id) = this.selected {
+                            this.store
+                                .update(cx, |s, cx| s.set_content(id, markdown, cx));
+                        }
+                    }
+                    BlockEditorEvent::Exit => this.focus_handle.focus(window, cx),
+                },
+            ),
             cx.observe(&tasks, |_, _, cx| cx.notify()),
             cx.subscribe_in(
                 &prop_input,
@@ -130,13 +145,18 @@ impl NotesPage {
                             let value = input.read(cx).value();
                             this.store.update(cx, |s, cx| s.set_title(id, &value, cx));
                         }
-                        InputEvent::PressEnter { .. } => this.edit(window, cx),
+                        InputEvent::PressEnter { .. } if this.source => {
+                            this.editor.update(cx, |e, cx| e.focus(window, cx));
+                        }
+                        InputEvent::PressEnter { .. } => {
+                            this.blocks.update(cx, |b, cx| b.focus_start(window, cx));
+                        }
                         _ => {}
                     }
                 },
             ),
             cx.subscribe_in(&editor, window, |this, input, event: &InputEvent, _, cx| {
-                if let (InputEvent::Change, Some(id), true) = (event, this.selected, this.editing) {
+                if let (InputEvent::Change, Some(id), true) = (event, this.selected, this.source) {
                     let value = input.read(cx).value();
                     this.store.update(cx, |s, cx| s.set_content(id, &value, cx));
                 }
@@ -150,7 +170,8 @@ impl NotesPage {
             adding_prop: false,
             new_prop,
             selected: None,
-            editing: false,
+            source: false,
+            blocks,
             full: false,
             title,
             editor,
@@ -164,9 +185,9 @@ impl NotesPage {
 
     /// Called by `Workspace::navigate`: something rendered must hold focus.
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.editing {
+        if self.source {
             self.editor.update(cx, |e, cx| e.focus(window, cx));
-        } else {
+        } else if !self.blocks.update(cx, |b, cx| b.focus(window, cx)) {
             self.focus_handle.focus(window, cx);
         }
     }
@@ -189,17 +210,21 @@ impl NotesPage {
 
     fn show(&mut self, id: NoteId, window: &mut Window, cx: &mut Context<Self>) {
         self.selected = Some(id);
-        self.editing = false;
+        self.source = false;
         self.editing_prop = None;
         self.adding_prop = false;
-        let title = self
+        let (title, content) = self
             .store
             .read(cx)
             .note(id)
-            .map(|n| n.split().title.to_string())
+            .map(|n| {
+                let parts = n.split();
+                (parts.title.to_string(), parts.content.to_string())
+            })
             .unwrap_or_default();
         self.title
             .update(cx, |t, cx| t.set_value(title, window, cx));
+        self.blocks.update(cx, |b, cx| b.load(&content, cx));
         cx.notify();
     }
 
@@ -212,7 +237,7 @@ impl NotesPage {
             Some(id) => self.show(id, window, cx),
             None => {
                 self.selected = None;
-                self.editing = false;
+                self.source = false;
             }
         }
     }
@@ -225,8 +250,8 @@ impl NotesPage {
         else {
             return;
         };
-        // The store is the source of truth while previewing (checkbox clicks edit it there).
-        self.editing = true;
+        // The store is the source of truth while the block editor shows.
+        self.source = true;
         self.editor.update(cx, |e, cx| {
             e.set_value(content, window, cx);
             e.focus(window, cx);
@@ -234,13 +259,19 @@ impl NotesPage {
         cx.notify();
     }
 
+    /// Back from the source to the block editor.
     fn preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.editing = false;
+        self.source = false;
+        let content = self
+            .selected
+            .and_then(|id| self.store.read(cx).note(id))
+            .map(|n| n.split().content.to_string())
+            .unwrap_or_default();
+        self.blocks.update(cx, |b, cx| b.load(&content, cx));
         self.focus_handle.focus(window, cx);
         cx.notify();
     }
 
-    /// Esc: leave the editor, then full view.
     fn edit_prop(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(value) = self
             .selected
@@ -273,7 +304,7 @@ impl NotesPage {
             self.adding_prop = false;
             self.focus_handle.focus(window, cx);
             cx.notify();
-        } else if self.editing {
+        } else if self.source {
             self.preview(window, cx);
         } else if self.full {
             self.full = false;
@@ -289,7 +320,7 @@ impl NotesPage {
             })
         {
             self.selected = None;
-            self.editing = false;
+            self.source = false;
             self.store.update(cx, |s, cx| s.delete(id, cx));
         }
     }
@@ -427,7 +458,7 @@ impl NotesPage {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let full = self.full;
-        let editing = self.editing;
+        let source = self.source;
         h_flex()
             .gap_1()
             .px_3()
@@ -458,16 +489,21 @@ impl NotesPage {
                         .small()
                         .rounded(ButtonRounded::Size(px(999.)))
                         .icon(
-                            Icon::new(if editing {
-                                IconName::Eye
+                            Icon::new(if source {
+                                IconName::Type
                             } else {
-                                IconName::SquarePen
+                                IconName::SquareCode
                             })
                             .text_color(theme.muted_foreground),
                         )
-                        .label(if editing { "Preview" } else { "Edit" })
+                        .label(if source { "Rich text" } else { "Markdown" })
+                        .tooltip(if source {
+                            "Back to the block editor"
+                        } else {
+                            "Edit the Markdown source"
+                        })
                         .on_click(cx.listener(|this, _, window, cx| {
-                            if this.editing {
+                            if this.source {
                                 this.preview(window, cx);
                             } else {
                                 this.edit(window, cx);
@@ -681,10 +717,8 @@ impl NotesPage {
             .child(add)
     }
 
-    fn render_body(&self, note: &Note, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let id = note.id;
-        let parts = note.split();
-        if self.editing {
+    fn render_body(&self) -> AnyElement {
+        if self.source {
             // XSmall = the kit's smallest editor padding (4px, no vertical); text size and a
             // -4px margin put the source where the rendered text was.
             return div()
@@ -697,41 +731,7 @@ impl NotesPage {
                 )
                 .into_any_element();
         }
-        // Clicking the blank space under the note continues writing, like a document.
-        let write_here = |id: &'static str, min_h: f32| {
-            div()
-                .id(id)
-                .w_full()
-                .min_h(px(min_h))
-                .cursor_text()
-                .on_click(cx.listener(|this, _, window, cx| this.edit(window, cx)))
-        };
-        if parts.content.trim().is_empty() {
-            return write_here("note-empty", 240.)
-                .text_base()
-                .text_color(theme.muted_foreground)
-                .child("Write something — Markdown works: # headings, - [ ] checklists, `code`…")
-                .into_any_element();
-        }
-        let offset = parts.content_offset(&note.text);
-        let store = self.store.clone();
-        v_flex()
-            .text_base()
-            .child(
-                markdown_view(
-                    ("note-md", id),
-                    parts.content.to_string(),
-                    document_style(),
-                    NoteStore::dir(),
-                )
-                .on_task_toggle(move |event, _, cx| {
-                    let marker = event.marker_range();
-                    let marker = marker.start + offset..marker.end + offset;
-                    store.update(cx, |s, cx| s.set_checkbox(id, marker, event.checked(), cx));
-                }),
-            )
-            .child(write_here("note-tail", 160.))
-            .into_any_element()
+        self.blocks.clone().into_any_element()
     }
 
     fn render_empty(&self, theme: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
@@ -819,7 +819,7 @@ impl Render for NotesPage {
                                     .font_weight(FontWeight::BOLD),
                             )
                             .child(self.render_properties(note, &theme, cx))
-                            .child(self.render_body(note, &theme, cx)),
+                            .child(self.render_body()),
                     )
                     .into_any_element(),
                 None => v_flex()

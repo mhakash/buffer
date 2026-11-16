@@ -109,8 +109,9 @@ The sidebar shows the countdown while a session is active. "Up next" = your top 
 Standalone Markdown notes for anything that isn't a task (⌘3; ⌘⇧N creates one from anywhere),
 laid out like Notion across the whole content area: a list pane (newest edit first, search filters
 by content and property values) and the open note as a document. The title is always editable
-(Enter jumps to the body); the body is rendered Markdown — Edit, or click the space below it, to
-write; Esc closes a property field, then the editor, then full view. The panel button hides the
+(Enter jumps to the body). The body is a Notion-style block editor (below); the Markdown /
+Rich text button switches to editing the raw source. Esc closes a property field, then the block
+being edited, then full view. The panel button hides the
 list (full view). In the file the title is the first line (`# Title`). A note left empty (no
 text, tags or properties) is discarded when you leave it; the trash button deletes (with
 confirmation).
@@ -118,6 +119,23 @@ confirmation).
 Properties under the title: Created, Edited, Tags (the task categories; + toggles), and any
 number of your own text properties ("Add a property" → name, Enter → value). Click a value to
 edit it; URL values get an open button; hover a row to remove it.
+
+### Block editor
+
+Every paragraph, heading, list item, to-do, quote, code fence and divider is a block. Blocks show
+formatted; click one to edit it (its inline Markdown — `**bold**`, links — shows while editing).
+Untouched blocks are saved byte for byte, so the file stays yours.
+
+| Input | Effect |
+|---|---|
+| `/` in an empty block | Block menu (type to filter, ↑↓ Enter); also the + handle on hover |
+| `# ` `## ` `### ` · `- ` · `1. ` · `[] ` · `> ` · ```` ``` ```` · `---` | Turn the block into heading · bullet · numbered · to-do · quote · code · divider |
+| Enter / ⇧Enter | New block (lists continue; Enter on an empty item leaves the list) / line break |
+| Backspace at start | Turn into text, then join with the block above |
+| ↑ ↓ ← → at an edge · Tab / ⇧Tab | Move between blocks · nest / un-nest list items |
+| ⌘B ⌘I ⌘E ⌘⇧X ⌘K | Bold, italic, code, strikethrough, link |
+| ⌘Enter in code | Leave the code block |
+| ⋮⋮ handle on hover | Turn into, move up/down, duplicate, delete |
 
 ## Markdown extras
 
@@ -159,7 +177,7 @@ pulsing indicators (saves battery). macOS "Reduce motion" is honoured by every a
 | `src/prefs.rs` | `settings.json` (appearance, name, ambient) as a global |
 | `src/theme.rs` | Light/dark appearance over gpui-kit's `Theme`; loads `themes/` |
 | `src/focus/` | `FocusTimer` entity (pomodoro state, `focus.json`) |
-| `src/notes/` | `NoteStore` entity (`notes.json` + `notes/<id>.md`) |
+| `src/notes/` | `NoteStore` entity (`notes.json` + `notes/<id>.md`); `blocks.rs` = Markdown ⇄ blocks |
 | `src/net.rs` | HTTP client GPUI uses for remote images |
 | `src/quotes.rs` | Daily sidebar line + time-of-day greeting |
 | `themes/buffer.json` | Light + dark palettes (hot-reloaded in debug builds) |

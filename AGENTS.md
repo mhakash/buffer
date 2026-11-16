@@ -35,7 +35,7 @@ workspace.rs   root view: aurora | TitleBar | custom sidebar | active page; owns
 tasks/         model.rs (Task + Subtask/Link/LogEntry, parse_quick_add, streak stats) · links.rs (URL → Jira/MR/… label) · store.rs (TaskStore entity)
 pages/task_detail.rs  side panel / full page (`full_page`); Workspace sizes it (`prefs.detail_width`, `ResizePanel` drag)
 focus/         FocusTimer entity (pomodoro, focus.json)
-notes/         NoteStore entity (notes.json index + notes/<id>.md; first line = title via split/compose); pages/notes.rs = list + document panes, fills the content area itself (Workspace skips the max-width wrapper)
+notes/         NoteStore entity (notes.json index + notes/<id>.md; first line = title via split/compose); pages/notes.rs = list + document panes, fills the content area itself (Workspace skips the max-width wrapper); notes/blocks.rs = Markdown ⇄ blocks (untouched blocks keep their source); pages/block_editor.rs = Notion-style editor, one shared TextareaState swapped into the active block
 pages/         one Render view per sidebar page; Page enum lists them. task_detail.rs = right panel owned by Workspace; pages `cx.emit(OpenTask(id))`, Workspace subscribes and opens it
 components/    thin fn wrappers over kit components + icon Assets; fx.rs = glow/gradient/ring/animations; markdown.rs = `markdown_view` (always use it for Markdown: Mermaid + frontmatter + clickable-image plugins, image resolver); lightbox.rs = full-window image view (Global; Workspace renders it last and routes keys via `capture_key`)
 net.rs        HttpClient for GPUI (ureq on a thread); without it remote images never load
@@ -79,6 +79,8 @@ API source of truth: `~/.cargo/registry/src/*/{gpui-pre-0.3.12,gpui-base-0.9.1,g
 | Closure in `.map()` needs `cx` → "captured variable cannot escape `FnMut`" | take `cx: &Context<Self>` (not `&mut`) in render helpers; `cx.listener` only needs `&` |
 | Borrow conflict reading theme then calling `cx.listener` | `let theme = cx.theme().clone();` at top of render |
 | Store read + later `cx` use | copy data out of `self.store.read(cx)` first (`to_vec()`, `cloned()`) |
+| Intercept keys a focused `Textarea` would handle (Enter, Backspace, arrows, Tab) | `.capture_action` on an ancestor + `cx.stop_propagation()`; caret display row via `state.display_map().buffer_pos_to_display_pos` (see `block_editor.rs`) |
+| Caret at a click on text that becomes an input | `window.on_next_frame` then `window.dispatch_event` a MouseDown/Up at the clamped point (`BlockEditor::click_block`) |
 | Hover-only row actions | parent `.group(name)`, child `.opacity(0.).group_hover(name, \|s\| s.opacity(1.))`; group name unique per row |
 | Element IDs | tuple form `("prefix", u64)`; keep prefixes unique per view |
 | Mermaid look | palette built from the app theme in `diagram_theme`; renderer output post-processed in `polish_svg` (radii, edge width); canvas is transparent, so put it on an opaque surface |

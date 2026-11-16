@@ -1,14 +1,13 @@
 //! Standalone Markdown notes (not tied to a task). Index in `notes.json`, each body in
 //! `notes/<id>.md`. All mutations go through `NoteStore`, which saves and notifies.
 
+pub mod blocks;
+
 use chrono::{DateTime, Utc};
 use gpui_kit::{Context, SharedString};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    storage,
-    tasks::{self, set_checkbox},
-};
+use crate::{storage, tasks};
 
 pub type NoteId = u64;
 
@@ -92,13 +91,6 @@ pub struct Split<'a> {
     pub title: &'a str,
     /// Everything after the title line, leading blank lines dropped.
     pub content: &'a str,
-}
-
-impl Split<'_> {
-    /// Byte offset of `content` in the full text (content is always a suffix).
-    pub fn content_offset(&self, text: &str) -> usize {
-        text.len() - self.content.len()
-    }
 }
 
 pub fn split(text: &str) -> Split<'_> {
@@ -245,22 +237,6 @@ impl NoteStore {
         );
     }
 
-    /// Ticks or unticks the `[ ]` / `[x]` marker at `marker` (byte range in the full text).
-    pub fn set_checkbox(
-        &mut self,
-        id: NoteId,
-        marker: std::ops::Range<usize>,
-        checked: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(text) = self
-            .note(id)
-            .and_then(|n| set_checkbox(&n.text, marker, checked))
-        {
-            self.edit(id, |_| text, cx);
-        }
-    }
-
     pub fn toggle_tag(&mut self, id: NoteId, tag: tasks::Id, cx: &mut Context<Self>) {
         self.edit_meta(id, cx, |n| {
             if let Some(ix) = n.tags.iter().position(|t| *t == tag) {
@@ -394,7 +370,7 @@ mod tests {
                 content: "- one\n- two\n"
             }
         );
-        assert_eq!(&text[parts.content_offset(text)..], parts.content);
+        assert!(text.ends_with(parts.content));
         assert_eq!(compose(parts.prefix, parts.title, parts.content), text);
         // A plain first line stays plain.
         assert_eq!(compose("", "Ideas", "x"), "Ideas\n\nx");

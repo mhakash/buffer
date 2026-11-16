@@ -1,3 +1,4 @@
+mod block_editor;
 mod focus;
 mod notes;
 mod settings;

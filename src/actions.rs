@@ -1,6 +1,10 @@
 //! App-wide actions, key bindings and the native menu bar.
 
-use gpui_kit::{Action, App, KeyBinding, Menu, MenuItem, SystemMenuType, actions};
+use std::rc::Rc;
+
+use gpui_kit::{
+    Action, App, KeyBinding, KeyBindingContextPredicate, Menu, MenuItem, SystemMenuType, actions,
+};
 
 use crate::{APP_NAME, theme};
 
@@ -20,6 +24,12 @@ actions!(
     ]
 );
 
+// Inline formatting in the note block editor.
+actions!(
+    block_editor,
+    [Bold, Italic, InlineCode, Strikethrough, Link]
+);
+
 pub fn init(cx: &mut App) {
     let bindings = [
         bind("secondary-q", Quit, cx),
@@ -34,6 +44,13 @@ pub fn init(cx: &mut App) {
         bind("secondary-,", ShowSettings, cx),
     ];
     cx.bind_keys(bindings);
+    cx.bind_keys([
+        bind_in("secondary-b", Bold, "BlockEditor", cx),
+        bind_in("secondary-i", Italic, "BlockEditor", cx),
+        bind_in("secondary-e", InlineCode, "BlockEditor", cx),
+        bind_in("secondary-shift-x", Strikethrough, "BlockEditor", cx),
+        bind_in("secondary-k", Link, "BlockEditor", cx),
+    ]);
 
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &ToggleTheme, cx| theme::toggle(cx));
@@ -62,6 +79,21 @@ pub fn init(cx: &mut App) {
             MenuItem::action("Toggle Light/Dark", ToggleTheme),
         ]),
     ]);
+}
+
+/// Binding active only inside the `context` key context.
+fn bind_in(keys: &str, action: impl Action, context: &str, cx: &App) -> KeyBinding {
+    let predicate = KeyBindingContextPredicate::parse(context)
+        .unwrap_or_else(|err| panic!("invalid key context {context}: {err:?}"));
+    KeyBinding::load(
+        keys,
+        Box::new(action),
+        Some(Rc::new(predicate)),
+        false,
+        None,
+        cx,
+    )
+    .unwrap_or_else(|err| panic!("invalid key binding {keys}: {err:?}"))
 }
 
 /// Global binding; `secondary` is cmd on macOS and ctrl elsewhere, which only `load` resolves.
