@@ -183,8 +183,20 @@ impl BlockEditor {
 
     // ---- shared helpers ----
 
+    /// Room left of the text for the "+" and drag handles.
     fn gutter(&self) -> f32 {
-        if self.compact { 24. } else { 48. }
+        if self.compact { 40. } else { 48. }
+    }
+
+    /// Size of each gutter handle ("+" and grip); both fit in `gutter() - 4`.
+    fn handle_size(&self) -> f32 {
+        if self.compact { 18. } else { 22. }
+    }
+
+    /// How far the editor reaches into its host's left padding; the rest of the gutter
+    /// indents the text (the side panel's padding is too narrow for both handles).
+    fn reach(&self) -> f32 {
+        if self.compact { 14. } else { 48. }
     }
 
     /// Save: emit the Markdown and repaint.
@@ -341,7 +353,7 @@ impl Render for BlockEditor {
             .flex_col()
             // Reach into the gutter like the rows do, so the handles are inside the editor
             // (drags over them count as over the editor).
-            .ml(px(-self.gutter()))
+            .ml(px(-self.reach()))
             .pl(px(self.gutter()))
             .track_focus(&self.focus_handle)
             .key_context(if self.active.is_some() {

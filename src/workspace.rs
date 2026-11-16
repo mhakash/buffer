@@ -404,6 +404,8 @@ impl Workspace {
                     )
                     .child(
                         div()
+                            .flex_1()
+                            .min_w_0()
                             .text_xs()
                             .italic()
                             .text_color(theme.muted_foreground)

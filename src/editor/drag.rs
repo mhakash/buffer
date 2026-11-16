@@ -91,7 +91,7 @@ impl BlockEditor {
         };
         h_flex()
             .id(("blk-grip", id))
-            .size(px(22.))
+            .size(px(self.handle_size()))
             .flex_none()
             .items_center()
             .justify_center()

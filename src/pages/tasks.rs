@@ -1287,8 +1287,10 @@ impl TasksPage {
         };
         let (sub_done, sub_total) = task.subtask_progress();
         let today = Local::now().date_naive();
+        // Title wins the space: badges and tags shrink and clip before it truncates.
         let badges = h_flex()
-            .flex_none()
+            .min_w_0()
+            .overflow_hidden()
             .gap_3()
             .when_some(task.due.filter(|_| !done), |this, due| {
                 let color = if task.is_overdue(today) {
@@ -1331,14 +1333,14 @@ impl TasksPage {
                 h_flex()
                     .id(("open", id))
                     .flex_1()
-                    .min_w_0()
+                    .min_w(px(TITLE_MIN_W))
                     .gap_3()
                     .cursor_pointer()
                     .on_click(cx.listener(move |_, _, _, cx| cx.emit(OpenTask(id))))
                     .child(
                         div()
                             .flex_1()
-                            .min_w_0()
+                            .min_w(px(TITLE_MIN_W))
                             .truncate()
                             .text_sm()
                             .when(done || completing, |this| {
@@ -1349,28 +1351,36 @@ impl TasksPage {
                     .child(badges),
             )
             // Two tags fit comfortably; more collapse into a "+n" pill.
-            .children(categories.iter().take(2).map(|category| {
-                category_tag(category.name.clone(), hex(category.color)).flex_none()
-            }))
-            .when(categories.len() > 2, |this| {
-                let rest = categories[2..]
-                    .iter()
-                    .map(|c| c.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+            .when(!categories.is_empty(), |this| {
                 this.child(
-                    div()
-                        .id(("more-categories", id))
-                        .flex_none()
-                        .px_1p5()
-                        .rounded_full()
-                        .bg(theme.secondary)
-                        .text_xs()
-                        .text_color(muted)
-                        .child(format!("+{}", categories.len() - 2))
-                        .tooltip(move |window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(rest.clone())
-                                .build(window, cx)
+                    h_flex()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .gap_1p5()
+                        .children(categories.iter().take(2).map(|category| {
+                            category_tag(category.name.clone(), hex(category.color)).flex_none()
+                        }))
+                        .when(categories.len() > 2, |this| {
+                            let rest = categories[2..]
+                                .iter()
+                                .map(|c| c.name.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            this.child(
+                                div()
+                                    .id(("more-categories", id))
+                                    .flex_none()
+                                    .px_1p5()
+                                    .rounded_full()
+                                    .bg(theme.secondary)
+                                    .text_xs()
+                                    .text_color(muted)
+                                    .child(format!("+{}", categories.len() - 2))
+                                    .tooltip(move |window, cx| {
+                                        gpui_kit::component::tooltip::Tooltip::new(rest.clone())
+                                            .build(window, cx)
+                                    }),
+                            )
                         }),
                 )
             })
@@ -1400,6 +1410,9 @@ impl TasksPage {
         }
     }
 }
+
+/// Width a task title keeps before row badges and tags give way.
+const TITLE_MIN_W: f32 = 160.;
 
 impl EventEmitter<OpenTask> for TasksPage {}
 

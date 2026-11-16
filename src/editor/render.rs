@@ -292,7 +292,11 @@ impl BlockEditor {
         let id = self.doc.blocks[ix].id;
         let add = Button::new(("blk-add", id))
             .ghost()
-            .xsmall()
+            .with_size(if self.compact {
+                Size::Size(px(self.handle_size()))
+            } else {
+                Size::XSmall
+            })
             .rounded(ButtonRounded::Size(px(6.)))
             .icon(Icon::new(IconName::Plus).text_color(theme.muted_foreground))
             .tooltip("Add a block below")
@@ -310,7 +314,7 @@ impl BlockEditor {
                 h.opacity(0.)
                     .group_hover(format!("blk-{id}"), |s| s.opacity(1.))
             })
-            .when(!self.compact, |this| this.child(add))
+            .child(add)
             .child(self.render_grip(ix, theme, cx))
             .into_any_element()
     }
