@@ -20,7 +20,7 @@ use super::{
     model::{Kind, inline_markdown},
 };
 use crate::blocks::{self, model::ParamKind};
-use crate::components::{document_style, markdown_style, markdown_view};
+use crate::components::{document_style, markdown_style, markdown_view, take_claimed_click};
 
 const INDENT: f32 = 24.;
 const MARKER_W: f32 = 24.;
@@ -147,7 +147,8 @@ impl BlockEditor {
             .child(self.render_handles(ix, indent_x, handle_top, theme, cx))
             .when(!active && *kind != Kind::Divider, |row| {
                 row.on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-                    if this.drag_selecting {
+                    // A click in a custom block's output selects text or follows a link.
+                    if this.drag_selecting || take_claimed_click(event.position()) {
                         return;
                     }
                     if let Some(ix) = this.index_of(id) {

@@ -87,6 +87,7 @@ API source of truth: `~/.cargo/registry/src/*/{gpui-pre-0.3.12,gpui-base-0.9.1,g
 | Intercept keys a focused `Textarea` would handle (Enter, Backspace, arrows, Tab) | `.capture_action` on an ancestor + `cx.stop_propagation()`; caret display row via `state.display_map().buffer_pos_to_display_pos` (see `editor/editing.rs`) |
 | Our binding loses to a kit `Input` binding on the same keys | bind with context `"YourContext > Input"` (same depth, registered later, wins; see `editor/keymap.rs`) |
 | Click on a child (handle, checkbox, button) also fires the parent row's `on_click` | `cx.stop_propagation()` in the child's handler |
+| Selectable text (`TextView`) inside a clickable parent: stopping the click also swallows the mouse-up that ends the text selection (it keeps following the pointer) | don't stop it; claim it and let the parent check (`components::take_claimed_click`, used by block output in the editor) |
 | `canvas` used to measure an element can report a shifted origin | prefer the element's own geometry (e.g. `InputState::text_bounds()`); a drag/drop target must contain the pointer (`on_drag_move` bounds, `on_drop` hitbox), so widen the root rather than letting children overflow it |
 | Caret at a click on text that becomes an input | after it lays out (`text_bounds()` changed; retry `on_next_frame`), `window.dispatch_event` a MouseDown/Up clamped into it (`editor::replay_click`) |
 | Hover-only row actions | parent `.group(name)`, child `.opacity(0.).group_hover(name, \|s\| s.opacity(1.))`; group name unique per row |

@@ -12,5 +12,7 @@ mod property;
 pub use assets::Assets;
 pub use card::card;
 pub use chip::{category_tag, chip, icon_button};
-pub use markdown::{document_style, markdown_style, markdown_view, output_view};
+pub use markdown::{
+    document_style, markdown_style, markdown_view, output_view, take_claimed_click,
+};
 pub use property::property_row;

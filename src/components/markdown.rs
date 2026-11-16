@@ -28,6 +28,10 @@ use gpui_kit::{
     px, rems,
 };
 
+use std::time::{Duration, Instant};
+
+use gpui_kit::{Pixels, Point};
+
 use super::lightbox;
 use crate::blocks::{self, model::Config};
 
@@ -683,12 +687,14 @@ impl MarkdownPlugin for BlockPlugin {
 
         let body = status.output.as_ref().and_then(|out| {
             (!out.markdown.trim().is_empty()).then(|| {
-                // Clicks stay here (select, copy, follow links); a note editor would otherwise
-                // open the block's config. Editing goes through the meta line.
+                // Clicks here select text, copy and follow links; the note editor must not take
+                // them as "edit this block" (that's the meta line's Edit). The click is claimed
+                // instead of stopped: stopping it would also swallow the mouse-up that ends a
+                // text selection, which then keeps following the pointer.
                 div()
                     .id(("block-body", id))
                     .cursor(CursorStyle::IBeam)
-                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .on_click(|event, _, _| claim_click(event.position()))
                     .child(output_view(
                         ("block-out", id),
                         out.markdown.clone(),
@@ -751,6 +757,24 @@ impl MarkdownPlugin for BlockPlugin {
             .child(meta)
             .into_any_element()
     }
+}
+
+thread_local! {
+    /// Where and when the last click inside a block's output landed.
+    static CLAIMED_CLICK: std::cell::Cell<Option<(Point<Pixels>, Instant)>> =
+        const { std::cell::Cell::new(None) };
+}
+
+fn claim_click(position: Point<Pixels>) {
+    CLAIMED_CLICK.set(Some((position, Instant::now())));
+}
+
+/// True (once) if the click at `position` was inside a block's output: a surrounding editor
+/// should leave it alone. Clicks bubble from the output to its container within one dispatch.
+pub fn take_claimed_click(position: Point<Pixels>) -> bool {
+    CLAIMED_CLICK
+        .take()
+        .is_some_and(|(at, when)| at == position && when.elapsed() < Duration::from_millis(500))
 }
 
 /// Asks before letting this workspace's custom blocks run their scripts.
