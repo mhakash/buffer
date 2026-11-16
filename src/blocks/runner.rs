@@ -75,13 +75,19 @@ pub fn run(job: &Job) -> Output {
 fn execute(job: &Job) -> anyhow::Result<(String, String, bool)> {
     let mut cmd = Command::new(&job.shell);
     // `exec "$@"`: the shell replaces itself with the command, args passed verbatim (no quoting).
-    cmd.args(["-l", "-c", "exec \"$@\"", "buffer-block"])
-        .args(&job.command)
-        .current_dir(&job.dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0);
+    // Helpers go first on PATH after the login profile has set it (the profile would reset it).
+    cmd.args([
+        "-l",
+        "-c",
+        "[ -n \"$BUFFER_HELPERS\" ] && PATH=\"$BUFFER_HELPERS:$PATH\"; exec \"$@\"",
+        "buffer-block",
+    ])
+    .args(&job.command)
+    .current_dir(&job.dir)
+    .stdin(Stdio::piped())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .process_group(0);
     for (key, value) in &job.input {
         let value = match value {
             Value::String(s) => s.clone(),
@@ -256,6 +262,26 @@ mod tests {
             out.markdown.trim(),
             format!("{{\"max-items\":5}}|5|hi|{}", real.display())
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn helpers_come_first_on_path() {
+        let dir = scratch("helpers");
+        let bin = dir.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(bin.join("buffer-get"), "#!/bin/sh\necho \"value of $1\"\n").unwrap();
+        let status = Command::new("chmod")
+            .args(["+x", &bin.join("buffer-get").display().to_string()])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let mut job = job(dir.clone(), "buffer-get TOKEN", json!({}), 10);
+        job.env
+            .push(("BUFFER_HELPERS".into(), bin.display().to_string()));
+        let out = run(&job);
+        assert!(out.ok, "{}", out.stderr);
+        assert_eq!(out.markdown.trim(), "value of TOKEN");
         fs::remove_dir_all(dir).unwrap();
     }
 

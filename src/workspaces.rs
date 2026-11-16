@@ -215,6 +215,7 @@ pub fn remove(id: Id, cx: &mut App) {
         return;
     }
     update(cx, |r| r.workspaces.retain(|w| w.id != id));
+    crate::vault::update(cx, |v| v.forget_workspace(id));
 }
 
 /// Mutates, persists, re-points storage and notifies observers (the root view reloads on a

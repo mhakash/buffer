@@ -220,6 +220,17 @@ impl Output {
         ttl == 0 || (now - self.ran_at).num_seconds() < ttl as i64
     }
 
+    /// A run that couldn't start (e.g. a missing secret).
+    pub fn failed(problem: impl Into<String>) -> Self {
+        Self {
+            markdown: String::new(),
+            stderr: problem.into(),
+            ok: false,
+            ran_at: Utc::now(),
+            duration_ms: 0,
+        }
+    }
+
     /// A failed run keeps the last good Markdown so the block doesn't go blank on a hiccup.
     pub fn keeping(mut self, previous: Option<&Output>) -> Self {
         if !self.ok

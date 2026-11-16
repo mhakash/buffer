@@ -50,7 +50,7 @@ every page; a running focus timer is dropped.
 
 | Location | Contents |
 |---|---|
-| App dir: `~/Library/Application Support/Buffer/` (or `$BUFFER_DATA_DIR`) | `settings.json` + `workspaces.json` (app-level, shared by all workspaces); also the root of the default workspace (**Personal**), so pre-0.16 data loads unchanged. A pre-rename `Workdesk` folder is moved here on first launch. |
+| App dir: `~/Library/Application Support/Buffer/` (or `$BUFFER_DATA_DIR`) | `settings.json` + `workspaces.json` + `vault.json` (secrets & config, mode 0600) + `bin/buffer-get` (app-level, shared by all workspaces); also the root of the default workspace (**Personal**), so pre-0.16 data loads unchanged. A pre-rename `Workdesk` folder is moved here on first launch. |
 | `<app dir>/Workspaces/<name>/` | Root of a workspace made with **New workspace** |
 | any folder | Root of a workspace added with **Open folder…** (e.g. a synced folder) |
 
@@ -195,10 +195,20 @@ limit: 5
 |---|---|
 | Config | `key: value` lines in the fence; params not given use their defaults. Editing the block shows the params it takes |
 | Script | Runs in `blocks/<name>/` through your login shell (Homebrew tools work). Gets params as JSON on stdin and as `BLOCK_<NAME>` env vars; stdout = the Markdown; non-zero exit = failed (stderr shown, last output kept) |
-| Environment | Per block type; a value `keychain:<service>` is read from the login keychain at run time (`security add-generic-password -s <service> -a $USER -w`) |
+| Environment | Per block type. Values can be literal, `secret:NAME` / `config:NAME` (from Secrets & config, below), or `keychain:<service>` (login keychain, `security add-generic-password -s <service> -a $USER -w`). A reference that isn't set fails the run with a message |
+| `buffer-get NAME` | On every block script's PATH: prints NAME from Secrets & config for the block's workspace (exit 1 if not set), so scripts can read values they don't declare |
 | Refresh | Output is cached; a block older than its **Fresh for** seconds re-runs when shown (0 = never); hover → ↻ re-runs now. **Timeout** kills the script and anything it started |
 | Trust | Off per workspace until you click **Allow…** on a block (or Settings → Workspaces → Run block scripts). Test runs on the Blocks page always run |
 | Saving | Explicit (Save). Every save re-runs that type's blocks; editing the script outside the app doesn't, so use ↻ |
+
+### Secrets & config
+
+Settings → Secrets & config holds named values for block scripts: **All workspaces**, plus per-workspace
+overrides (**Only "<workspace>"**; an override wins). Mark a value **Secret** to keep it out of the UI
+(shown as dots; edit = replace). Everything lives in `vault.json` in the app dir, readable only by you;
+it's never written into a workspace folder. Shape:
+`{"global": [{"name", "value", "secret"}], "workspaces": {"<id>": [ … ]}}`. Outside a block,
+`BUFFER_WORKSPACE_ID=<id> Buffer.app/Contents/MacOS/buffer get NAME` does the same lookup.
 
 ## Look
 

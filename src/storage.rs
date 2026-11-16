@@ -109,6 +109,15 @@ pub fn save_at<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
     write_atomic(path, &serde_json::to_vec_pretty(value)?)
 }
 
+/// [`save_app`] readable only by the user (0600): for secrets.
+pub fn save_app_private<T: Serialize>(file: &str, value: &T) -> anyhow::Result<()> {
+    write_atomic_mode(
+        &app_dir().join(file),
+        &serde_json::to_vec_pretty(value)?,
+        0o600,
+    )
+}
+
 fn load_from<T: DeserializeOwned + Default>(path: &Path) -> T {
     match fs::read(path) {
         Ok(bytes) => match serde_json::from_slice(&bytes) {
@@ -189,13 +198,26 @@ pub fn copy(from: &str, to: &str) -> anyhow::Result<()> {
 
 /// A crash mid-write leaves the previous file intact.
 fn write_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    write_atomic_mode(path, bytes, 0o644)
+}
+
+/// [`write_atomic`] with the file's Unix permissions (applied before it replaces the old one).
+fn write_atomic_mode(path: &Path, bytes: &[u8], mode: u32) -> anyhow::Result<()> {
+    use std::{io::Write, os::unix::fs::OpenOptionsExt};
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
     let mut tmp = path.to_path_buf().into_os_string();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
-    fs::write(&tmp, bytes).with_context(|| format!("writing {}", tmp.display()))?;
+    let _ = fs::remove_file(&tmp);
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(mode)
+        .open(&tmp)
+        .and_then(|mut f| f.write_all(bytes))
+        .with_context(|| format!("writing {}", tmp.display()))?;
     fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))?;
     Ok(())
 }

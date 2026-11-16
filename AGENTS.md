@@ -30,6 +30,7 @@ main.rs        gpui_kit::application(), gpui_kit::open_window (wraps view in kit
 actions.rs     actions!(), key bindings (bind()), menu bar
 storage.rs     load/save JSON; sole path resolver: data_dir() = active workspace root, app_dir() = app config
 workspaces.rs  workspace registry (workspaces.json in app_dir) as a Global; switching re-points storage, Workspace rebuilds stores + pages
+vault.rs       vault.json (app dir, 0600): secrets & config for block scripts, all-workspace + per-workspace overrides, as a Global; `buffer get NAME` headless mode (main.rs) backs the `buffer-get` helper the runner puts on PATH
 prefs.rs       settings.json (appearance, name, ambient) as a Global; prefs::update saves + repaints
 theme.rs       Appearance → kit Theme; loads themes/buffer.json (watched in debug)
 workspace.rs   root view: aurora | TitleBar | custom sidebar | active page; owns TaskStore + FocusTimer

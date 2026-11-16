@@ -9,8 +9,8 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    Context, Entity, Focusable, FontWeight, SharedString, Subscription, Window, div, prelude::*,
-    px, rgb,
+    App, Context, Entity, Focusable, FontWeight, SharedString, Subscription, Window, div,
+    prelude::*, px, rgb,
 };
 
 use crate::{
@@ -18,6 +18,7 @@ use crate::{
     prefs, storage,
     tasks::TaskStore,
     theme::{self, Appearance},
+    vault::{self, Scope},
     workspaces,
 };
 
@@ -31,6 +32,12 @@ pub struct SettingsPage {
     workspace_name: Entity<InputState>,
     new_workspace: Entity<InputState>,
     new_workspace_error: Option<SharedString>,
+    /// Secrets & config: showing this workspace's overrides (else all-workspace values).
+    vault_workspace: bool,
+    vault_name: Entity<InputState>,
+    vault_value: Entity<InputState>,
+    vault_secret: bool,
+    vault_error: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -52,6 +59,8 @@ impl SettingsPage {
         });
         let new_workspace =
             cx.new(|cx| InputState::new(window, cx).placeholder("New workspace name, then Enter"));
+        let vault_name = cx.new(|cx| InputState::new(window, cx).placeholder("NAME"));
+        let vault_value = cx.new(|cx| InputState::new(window, cx).placeholder("Value"));
         let subscriptions = vec![
             cx.subscribe_in(
                 &workspace_name,
@@ -96,6 +105,15 @@ impl SettingsPage {
             ),
             cx.observe(&store, |_, _, cx| cx.notify()),
             cx.subscribe_in(
+                &vault_value,
+                window,
+                |this, _, event: &InputEvent, window, cx| {
+                    if let InputEvent::PressEnter { .. } = event {
+                        this.save_vault_item(window, cx);
+                    }
+                },
+            ),
+            cx.subscribe_in(
                 &category_input,
                 window,
                 |this, input, event: &InputEvent, window, cx| {
@@ -115,6 +133,11 @@ impl SettingsPage {
             workspace_name,
             new_workspace,
             new_workspace_error: None,
+            vault_workspace: false,
+            vault_name,
+            vault_value,
+            vault_secret: false,
+            vault_error: None,
             _subscriptions: subscriptions,
         }
     }
@@ -277,6 +300,266 @@ impl SettingsPage {
                                 workspaces::set_blocks_trusted(*checked, cx)
                             })),
                     ),
+            )
+    }
+
+    fn vault_scope(&self, cx: &App) -> Scope {
+        if self.vault_workspace {
+            Scope::Workspace(workspaces::get(cx).active().id)
+        } else {
+            Scope::All
+        }
+    }
+
+    /// Adds or replaces the item named in the form.
+    fn save_vault_item(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let name = self.vault_name.read(cx).value().trim().to_string();
+        let value = self.vault_value.read(cx).value().to_string();
+        if !vault::valid_name(&name) {
+            self.vault_error =
+                Some("Name: letters, digits, _ - . (not starting with a digit)".into());
+            cx.notify();
+            return;
+        }
+        let scope = self.vault_scope(cx);
+        let item = vault::Item {
+            name,
+            value,
+            secret: self.vault_secret,
+        };
+        vault::update(cx, |v| v.set(scope, item));
+        self.vault_error = None;
+        self.vault_secret = false;
+        self.vault_name
+            .update(cx, |i, cx| i.set_value("", window, cx));
+        self.vault_value.update(cx, |i, cx| {
+            i.set_value("", window, cx);
+            i.set_masked(false, window, cx);
+        });
+        cx.notify();
+    }
+
+    /// Loads an item into the form to change it; a secret's value is never put back in a field.
+    fn edit_vault_item(&mut self, item: &vault::Item, window: &mut Window, cx: &mut Context<Self>) {
+        self.vault_secret = item.secret;
+        let (name, value) = (
+            item.name.clone(),
+            if item.secret {
+                String::new()
+            } else {
+                item.value.clone()
+            },
+        );
+        self.vault_name
+            .update(cx, |i, cx| i.set_value(name, window, cx));
+        self.vault_value.update(cx, |i, cx| {
+            i.set_value(value, window, cx);
+            i.set_masked(item.secret, window, cx);
+            i.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    fn render_vault(&self, cx: &mut Context<Self>) -> gpui_kit::Div {
+        let theme = cx.theme().clone();
+        let scope = self.vault_scope(cx);
+        let vault = vault::get(cx).clone();
+        let workspace = workspaces::get(cx).active().name.clone();
+        let items = vault.items(scope).to_vec();
+
+        let rows = items.into_iter().map(|item| {
+            let name = item.name.clone();
+            let group = SharedString::from(format!("vault-row-{name}"));
+            let overrides =
+                matches!(scope, Scope::Workspace(_)) && vault.global.iter().any(|g| g.name == name);
+            let edit = {
+                let item = item.clone();
+                icon_button(
+                    SharedString::from(format!("vault-edit-{name}")),
+                    IconName::Pencil,
+                    theme.muted_foreground,
+                    if item.secret { "Replace value" } else { "Edit" },
+                )
+                .on_click(
+                    cx.listener(move |this, _, window, cx| this.edit_vault_item(&item, window, cx)),
+                )
+            };
+            let remove = {
+                let name = name.clone();
+                icon_button(
+                    SharedString::from(format!("vault-remove-{name}")),
+                    IconName::X,
+                    theme.danger,
+                    "Delete",
+                )
+                .on_click(cx.listener(move |_, _, window, cx| {
+                    let name = name.clone();
+                    let target = name.clone();
+                    confirm_delete(
+                        window,
+                        cx,
+                        format!("Delete “{name}”?"),
+                        "Block scripts that use it will fail until it's set again.",
+                        move |_, cx| vault::update(cx, |v| v.remove(scope, &target)),
+                    );
+                }))
+            };
+            h_flex()
+                .id(SharedString::from(format!("vault-row-{name}")))
+                .group(group.clone())
+                .gap_3()
+                .px_2()
+                .py_1()
+                .rounded_xl()
+                .hover(|s| s.bg(theme.secondary))
+                .child(
+                    Icon::new(if item.secret {
+                        IconName::Lock
+                    } else {
+                        IconName::Braces
+                    })
+                    .xsmall()
+                    .flex_none()
+                    .text_color(theme.muted_foreground),
+                )
+                .child(
+                    div()
+                        .w(px(180.))
+                        .flex_none()
+                        .truncate()
+                        .text_sm()
+                        .font_family(theme.mono_font_family.clone())
+                        .child(item.name.clone()),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_sm()
+                        .text_color(theme.muted_foreground)
+                        .child(if item.secret {
+                            "••••••••".to_string()
+                        } else {
+                            item.value.clone()
+                        }),
+                )
+                .when(overrides, |r| {
+                    r.child(
+                        div()
+                            .flex_none()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child("overrides"),
+                    )
+                })
+                .child(
+                    h_flex()
+                        .flex_none()
+                        .opacity(0.)
+                        .group_hover(group, |s| s.opacity(1.))
+                        .child(edit)
+                        .child(remove),
+                )
+        });
+        let empty = vault.items(scope).is_empty();
+        let secret = self.vault_secret;
+
+        card("Secrets & config", cx)
+            .child(div().text_xs().text_color(theme.muted_foreground).child(
+                "Values for block scripts. In a block's Environment use secret:NAME or \
+                 config:NAME; from a script run buffer-get NAME. Stored in vault.json in the app \
+                 folder (only you can read it); secret values are never shown here.",
+            ))
+            .child(
+                h_flex().child(
+                    TabBar::new("vault-scope")
+                        .segmented()
+                        .small()
+                        .selected_index(self.vault_workspace as usize)
+                        .child(Tab::new().label("All workspaces"))
+                        .child(Tab::new().label(format!("Only “{workspace}”")))
+                        .on_click(cx.listener(|this, ix: &usize, _, cx| {
+                            this.vault_workspace = *ix == 1;
+                            cx.notify();
+                        })),
+                ),
+            )
+            .children(rows)
+            .when(empty, |c| {
+                c.child(
+                    div()
+                        .px_2()
+                        .text_sm()
+                        .text_color(theme.muted_foreground)
+                        .child(if self.vault_workspace {
+                            "No overrides: this workspace uses the all-workspaces values."
+                        } else {
+                            "Nothing yet."
+                        }),
+                )
+            })
+            .child(
+                h_flex()
+                    .mt_1()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        div()
+                            .w(px(180.))
+                            .flex_none()
+                            .px_2()
+                            .rounded_full()
+                            .bg(theme.background)
+                            .text_sm()
+                            .child(Input::new(&self.vault_name).appearance(false)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .px_2()
+                            .rounded_full()
+                            .bg(theme.background)
+                            .text_sm()
+                            .child(Input::new(&self.vault_value).appearance(false)),
+                    )
+                    .child(
+                        h_flex()
+                            .flex_none()
+                            .gap_1()
+                            .items_center()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(
+                                Switch::new("vault-secret")
+                                    .small()
+                                    .checked(secret)
+                                    .on_click(cx.listener(|this, checked: &bool, window, cx| {
+                                        this.vault_secret = *checked;
+                                        let checked = *checked;
+                                        this.vault_value
+                                            .update(cx, |i, cx| i.set_masked(checked, window, cx));
+                                        cx.notify();
+                                    })),
+                            )
+                            .child("Secret"),
+                    )
+                    .child(
+                        Button::new("vault-save")
+                            .secondary()
+                            .small()
+                            .rounded(ButtonRounded::Size(px(999.)))
+                            .label("Save")
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.save_vault_item(window, cx)),
+                            ),
+                    ),
+            )
+            .children(
+                self.vault_error
+                    .clone()
+                    .map(|err| div().text_xs().text_color(theme.danger).child(err)),
             )
     }
 
@@ -449,7 +732,8 @@ impl Render for SettingsPage {
                 1,
             ))
             .child(fx::enter(self.render_workspaces(cx), "settings-workspaces", 2))
-            .child(fx::enter(self.render_categories(cx), "settings-categories", 3))
+            .child(fx::enter(self.render_vault(cx), "settings-vault", 3))
+            .child(fx::enter(self.render_categories(cx), "settings-categories", 4))
             .child(fx::enter(
                 card("Data", cx)
                     .child(
@@ -474,7 +758,7 @@ impl Render for SettingsPage {
                         ),
                     ),
                 "settings-data",
-                4,
+                5,
             ))
     }
 }

@@ -219,7 +219,13 @@ impl BlocksPage {
         EnvRow {
             id: self.next_row,
             key: self.field(key, "NAME", subs, window, cx),
-            value: self.field(val, "value, or keychain:<service>", subs, window, cx),
+            value: self.field(
+                val,
+                "value, secret:NAME, config:NAME or keychain:<service>",
+                subs,
+                window,
+                cx,
+            ),
         }
     }
 
@@ -433,7 +439,7 @@ impl BlocksPage {
         }
         let Some(d) = &self.draft else { return };
         let config = parse_config(&self.test_config.read(cx).value());
-        let rx = blocks::run_once(&d.base, &config);
+        let rx = blocks::run_once(&d.base, &config, cx);
         self.testing = true;
         self._test = Some(cx.spawn(async move |this, cx| {
             if let Ok(output) = rx.await {
@@ -808,7 +814,11 @@ impl BlocksPage {
 
         let env = Self::section(
             "Environment",
-            Some("keychain:<service> reads a secret from your login keychain at run time".into()),
+            Some(
+                "secret:NAME / config:NAME from Settings → Secrets & config; keychain:<service> \
+                 from the login keychain"
+                    .into(),
+            ),
             theme,
         )
         .children(d.env.iter().map(|row| {

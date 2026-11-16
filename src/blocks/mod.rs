@@ -29,7 +29,7 @@ use chrono::Utc;
 use futures::channel::oneshot;
 use gpui_kit::{App, Global, SharedString, assets::IconName};
 
-use crate::{storage, workspaces};
+use crate::{storage, vault, workspaces};
 use model::{BlockType, Config, Output};
 use runner::Job;
 
@@ -71,24 +71,44 @@ pub fn reload_types(cx: &mut App) {
 
 /// Runs a block once for the Blocks page's test run: no cache, no dedup, and no trust check
 /// (the user is running the script they are editing).
-pub fn run_once(ty: &BlockType, config: &Config) -> oneshot::Receiver<Output> {
-    let job = job(ty, config);
+pub fn run_once(ty: &BlockType, config: &Config, cx: &App) -> oneshot::Receiver<Output> {
+    let job = job(ty, config, cx);
     let (tx, rx) = oneshot::channel();
     thread::spawn(move || {
-        let _ = tx.send(runner::run(&job));
+        let _ = tx.send(match job {
+            Ok(job) => runner::run(&job),
+            Err(problem) => Output::failed(problem),
+        });
     });
     rx
 }
 
-fn job(ty: &BlockType, config: &Config) -> Job {
-    Job {
+/// What to run. `secret:NAME` / `config:NAME` Environment values are resolved from the vault
+/// here; one that isn't set fails the run with that message.
+fn job(ty: &BlockType, config: &Config, cx: &App) -> Result<Job, String> {
+    let workspace = workspaces::get(cx).active().id;
+    let vault = vault::get(cx);
+    let mut env = vault::script_env(workspace);
+    for (key, value) in &ty.env {
+        let value = match vault::reference(value) {
+            Some(name) => vault
+                .get(workspace, name)
+                .map(|item| item.value.clone())
+                .ok_or_else(|| {
+                    format!("{key}: “{name}” isn't set in Settings → Secrets & config")
+                })?,
+            None => value.clone(),
+        };
+        env.push((key.clone(), value));
+    }
+    Ok(Job {
         shell: runner::login_shell(),
         dir: storage::path(&store::folder(&ty.name)),
         command: Job::command(&ty.interpreter, &ty.script),
         input: ty.input(config),
-        env: ty.env.clone().into_iter().collect(),
+        env,
         timeout: Duration::from_secs(ty.timeout),
-    }
+    })
 }
 
 pub fn types(cx: &App) -> &[BlockType] {
@@ -156,7 +176,7 @@ fn start(ty: &BlockType, config: &Config, cx: &mut App) {
     let generation = GENERATION.load(Ordering::Relaxed);
     // Paths resolved now: the workspace may switch before the run ends.
     let cache = storage::path(&store::cache_file(&key));
-    let job = job(ty, config);
+    let job = job(ty, config, cx);
     let previous = cx
         .default_global::<Blocks>()
         .results
@@ -165,7 +185,11 @@ fn start(ty: &BlockType, config: &Config, cx: &mut App) {
         .flatten();
     let (tx, rx) = oneshot::channel();
     thread::spawn(move || {
-        let output = runner::run(&job).keeping(previous.as_ref());
+        let output = match job {
+            Ok(job) => runner::run(&job),
+            Err(problem) => Output::failed(problem),
+        }
+        .keeping(previous.as_ref());
         if let Err(err) = storage::save_at(&cache, &output) {
             eprintln!("couldn't cache block output: {err:#}");
         }

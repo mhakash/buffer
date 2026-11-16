@@ -11,6 +11,7 @@ mod quotes;
 mod storage;
 mod tasks;
 mod theme;
+mod vault;
 mod workspace;
 mod workspaces;
 
@@ -22,6 +23,11 @@ use crate::workspace::Workspace;
 pub const APP_NAME: &str = "Buffer";
 
 fn main() {
+    // `buffer get NAME`: headless lookup for block scripts (the `buffer-get` helper).
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("get") {
+        std::process::exit(vault::cli_get(&args[1..]));
+    }
     let app = gpui_kit::application().with_assets(components::Assets);
     // macOS convention: closing the window keeps the app in the Dock; clicking the Dock icon reopens it.
     app.on_reopen(|cx| {
@@ -35,6 +41,7 @@ fn main() {
         gpui_kit::init(cx);
         cx.set_http_client(net::Client::new());
         workspaces::init(cx);
+        vault::init(cx);
         prefs::init(cx);
         theme::init(cx);
         actions::init(cx);
