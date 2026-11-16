@@ -214,10 +214,16 @@ pub struct Output {
     pub duration_ms: u64,
 }
 
+/// A failed run is retried after this many seconds (or the type's `ttl`, if shorter), so a fixed
+/// secret or a network blip doesn't leave the error up for the whole refresh window.
+pub const RETRY_AFTER: u64 = 30;
+
 impl Output {
-    /// Fresh = ran less than `ttl` seconds ago; `ttl` 0 never goes stale (refresh by hand).
+    /// Fresh = ran less than `ttl` seconds ago (failed runs: [`RETRY_AFTER`]); `ttl` 0 never goes
+    /// stale (refresh by hand).
     pub fn is_fresh(&self, ttl: u64, now: DateTime<Utc>) -> bool {
-        ttl == 0 || (now - self.ran_at).num_seconds() < ttl as i64
+        let window = if self.ok { ttl } else { ttl.min(RETRY_AFTER) };
+        ttl == 0 || (now - self.ran_at).num_seconds() < window as i64
     }
 
     /// A run that couldn't start (e.g. a missing secret).
@@ -375,6 +381,14 @@ mod tests {
         assert!(out.is_fresh(300, now));
         assert!(!out.is_fresh(60, now));
         assert!(out.is_fresh(0, now));
+        let failed = Output { ok: false, ..out };
+        assert!(!failed.is_fresh(300, now));
+        assert!(failed.is_fresh(0, now));
+        let just_failed = Output {
+            ran_at: now - chrono::Duration::seconds(5),
+            ..failed
+        };
+        assert!(just_failed.is_fresh(300, now));
     }
 
     #[test]

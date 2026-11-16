@@ -197,7 +197,8 @@ limit: 5
 | Script | Runs in `blocks/<name>/` through your login shell (Homebrew tools work). Gets params as JSON on stdin and as `BLOCK_<NAME>` env vars; stdout = the Markdown; non-zero exit = failed (stderr shown, last output kept) |
 | Environment | Per block type. Values can be literal, `secret:NAME` / `config:NAME` (from Secrets & config, below), or `keychain:<service>` (login keychain, `security add-generic-password -s <service> -a $USER -w`). A reference that isn't set fails the run with a message |
 | `buffer-get NAME` | On every block script's PATH: prints NAME from Secrets & config for the block's workspace (exit 1 if not set), so scripts can read values they don't declare |
-| Refresh | Output is cached; a block older than its **Fresh for** seconds re-runs when shown (0 = never); hover → ↻ re-runs now. **Timeout** kills the script and anything it started |
+| Refresh | Output is cached; a block older than its **Fresh for** seconds re-runs when shown (0 = never); a failed run retries after 30 s. **Timeout** kills the script and anything it started |
+| Look | Output renders flat, in the note's own text style; a muted line under it (block name, last update, ↻) shows on hover, or always while running, failed or off |
 | Trust | Off per workspace until you click **Allow…** on a block (or Settings → Workspaces → Run block scripts). Test runs on the Blocks page always run |
 | Saving | Explicit (Save). Every save re-runs that type's blocks; editing the script outside the app doesn't, so use ↻ |
 | On disk | Block folders added, removed or whose `block.json` changed outside the app are picked up when you switch back to Buffer, or within 15 s — no restart |

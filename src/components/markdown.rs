@@ -22,8 +22,8 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    App, CursorStyle, ElementId, FontWeight, Hsla, Image, ImageFormat, ImageSource,
-    InteractiveElement, IntoElement, ObjectFit, ParentElement, Rgba, SharedString, SharedUri,
+    App, CursorStyle, ElementId, Hsla, Image, ImageFormat, ImageSource, InteractiveElement,
+    IntoElement, ObjectFit, ParentElement, Rgba, SharedString, SharedUri,
     StatefulInteractiveElement, Styled, StyledImage, Window, div, img, prelude::FluentBuilder as _,
     px, rems,
 };
@@ -62,7 +62,7 @@ pub fn markdown_view(
     style: TextViewStyle,
     dir: PathBuf,
 ) -> TextView {
-    output_view(id, text, style, dir.clone()).plugin(BlockPlugin { dir })
+    output_view(id, text, style.clone(), dir.clone()).plugin(BlockPlugin { dir, style })
 }
 
 /// Everything but programmatic blocks: a block's own output can't run more blocks.
@@ -512,6 +512,8 @@ const BLOCK: &str = "block";
 /// its Markdown in a card. Results are cached; stale ones re-run when shown.
 struct BlockPlugin {
     dir: PathBuf,
+    /// The surrounding view's style: output reads as part of the note.
+    style: TextViewStyle,
 }
 
 struct Fence {
@@ -559,20 +561,13 @@ impl MarkdownPlugin for BlockPlugin {
 
     fn render(&self, node: &MarkdownNode, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let card = v_flex()
-            .w_full()
-            .my_2()
-            .p_4()
-            .gap_2()
-            .rounded_2xl()
-            .border_1()
-            .border_color(theme.border)
-            .bg(theme.group_box);
+        // Flat: no surface of its own, so the output reads as part of the note.
+        let flat = v_flex().w_full().my_1().gap_1();
         let Some(fence) = node.data::<Fence>() else {
-            return card.into_any_element();
+            return flat.into_any_element();
         };
         let Some(ty) = blocks::find(&fence.name, cx).cloned() else {
-            return card
+            return flat
                 .child(
                     div()
                         .text_sm()
@@ -606,8 +601,17 @@ impl MarkdownPlugin for BlockPlugin {
         };
         let icon = Icon::empty()
             .path(blocks::icon_path(&ty.icon, cx))
-            .small()
+            .xsmall()
             .text_color(theme.muted_foreground);
+        let has_output = status
+            .output
+            .as_ref()
+            .is_some_and(|o| !o.markdown.trim().is_empty());
+        // The meta line shows on hover, or always when something needs attention.
+        let attention = !trusted
+            || status.running
+            || !has_output
+            || status.output.as_ref().is_some_and(|o| !o.ok);
         let ambient = crate::prefs::get(cx).ambient;
         let refresh = {
             let (ty, config) = (ty.clone(), fence.config.clone());
@@ -624,38 +628,25 @@ impl MarkdownPlugin for BlockPlugin {
                 blocks::refresh(&ty, &config, cx);
             })
         };
-        let header = h_flex()
+        let meta = h_flex()
             .w_full()
-            .gap_2()
+            .h(px(22.))
+            .gap_1p5()
             .items_center()
+            .text_xs()
+            .text_color(theme.muted_foreground)
+            .when(!attention, |m| {
+                m.opacity(0.).group_hover(group.clone(), |s| s.opacity(1.))
+            })
             .child(if status.running {
                 super::fx::pulse(icon, ("block-pulse", id), ambient, 0.35)
             } else {
                 icon.into_any_element()
             })
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_sm()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(ty.label().to_string()),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(note),
-            )
-            .when(trusted, |h| {
-                h.child(
-                    div()
-                        .opacity(0.)
-                        .group_hover(group.clone(), |s| s.opacity(1.))
-                        .child(refresh),
-                )
-            });
+            .child(div().min_w_0().truncate().child(ty.label().to_string()))
+            .child("·")
+            .child(div().flex_none().child(note))
+            .when(trusted, |m| m.child(refresh));
         let allow = (!trusted).then(|| {
             h_flex()
                 .gap_2()
@@ -684,7 +675,7 @@ impl MarkdownPlugin for BlockPlugin {
                 output_view(
                     ("block-out", id),
                     out.markdown.clone(),
-                    markdown_style(),
+                    self.style.clone(),
                     self.dir.clone(),
                 )
                 .into_any_element()
@@ -736,11 +727,11 @@ impl MarkdownPlugin for BlockPlugin {
                 })
         });
 
-        card.group(group)
-            .child(header)
+        flat.group(group)
             .children(allow)
             .children(body)
             .children(error)
+            .child(meta)
             .into_any_element()
     }
 }
