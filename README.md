@@ -200,6 +200,7 @@ limit: 5
 | Refresh | Output is cached; a block older than its **Fresh for** seconds re-runs when shown (0 = never); hover → ↻ re-runs now. **Timeout** kills the script and anything it started |
 | Trust | Off per workspace until you click **Allow…** on a block (or Settings → Workspaces → Run block scripts). Test runs on the Blocks page always run |
 | Saving | Explicit (Save). Every save re-runs that type's blocks; editing the script outside the app doesn't, so use ↻ |
+| On disk | Block folders added, removed or whose `block.json` changed outside the app are picked up when you switch back to Buffer, or within 15 s — no restart |
 
 ### Secrets & config
 

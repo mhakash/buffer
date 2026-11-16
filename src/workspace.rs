@@ -61,6 +61,8 @@ pub struct Workspace {
     root: PathBuf,
     _clock: Task<()>,
     _registry: Subscription,
+    /// Coming back to the app picks up block types changed on disk meanwhile.
+    _activation: Subscription,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -132,9 +134,18 @@ impl Workspace {
                 cx.background_executor()
                     .timer(Duration::from_secs(15))
                     .await;
-                if this.update(cx, |_, cx| cx.notify()).is_err() {
+                let tick = this.update(cx, |_, cx| {
+                    crate::blocks::reload_if_changed(cx);
+                    cx.notify();
+                });
+                if tick.is_err() {
                     break;
                 }
+            }
+        });
+        let activation = cx.observe_window_activation(window, |_, window, cx| {
+            if window.is_window_active() {
+                crate::blocks::reload_if_changed(cx);
             }
         });
         let registry = cx.observe_global_in::<workspaces::Registry>(window, |this, window, cx| {
@@ -159,6 +170,7 @@ impl Workspace {
             detail: content.detail,
             _clock: clock,
             _registry: registry,
+            _activation: activation,
             _subscriptions: content.subscriptions,
         }
     }

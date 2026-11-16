@@ -21,6 +21,22 @@ pub fn cache_file(key: &str) -> String {
     format!("{CACHE}/{key}.json")
 }
 
+/// Folder names under `blocks/` with their `block.json` modified time: changes when a block type
+/// is added, removed or edited on disk.
+pub type Signature = Vec<(String, Option<std::time::SystemTime>)>;
+
+pub fn signature() -> Signature {
+    storage::list_dirs(DIR)
+        .into_iter()
+        .map(|name| {
+            let modified = std::fs::metadata(storage::path(&file(&name)))
+                .and_then(|m| m.modified())
+                .ok();
+            (name, modified)
+        })
+        .collect()
+}
+
 /// Every folder under `blocks/` with a valid name and a `block.json`.
 pub fn load_all() -> Vec<BlockType> {
     storage::list_dirs(DIR)

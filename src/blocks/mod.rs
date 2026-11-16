@@ -39,6 +39,8 @@ static GENERATION: AtomicU64 = AtomicU64::new(0);
 #[derive(Default)]
 pub struct Blocks {
     types: Vec<BlockType>,
+    /// What `types` was read from, to notice folders added, removed or edited on disk.
+    signature: store::Signature,
     /// Results by key; `None` = looked on disk, nothing cached.
     results: HashMap<String, Option<Output>>,
     running: HashSet<String>,
@@ -58,6 +60,7 @@ pub struct Status {
 pub fn load(cx: &mut App) {
     GENERATION.fetch_add(1, Ordering::Relaxed);
     cx.set_global(Blocks {
+        signature: store::signature(),
         types: store::load_all(),
         ..Default::default()
     });
@@ -65,8 +68,19 @@ pub fn load(cx: &mut App) {
 
 /// Re-reads block types after one was saved or removed; results stay (keys carry the revision).
 pub fn reload_types(cx: &mut App) {
-    cx.default_global::<Blocks>().types = store::load_all();
+    let blocks = cx.default_global::<Blocks>();
+    blocks.signature = store::signature();
+    blocks.types = store::load_all();
     cx.refresh_windows();
+}
+
+/// Picks up block folders added, removed or edited outside the app (cheap: a directory listing
+/// and one stat per block). Called on window activation and the workspace's periodic tick.
+pub fn reload_if_changed(cx: &mut App) {
+    let current = cx.try_global::<Blocks>().map(|b| &b.signature);
+    if current.is_some_and(|s| *s != store::signature()) {
+        reload_types(cx);
+    }
 }
 
 /// Runs a block once for the Blocks page's test run: no cache, no dedup, and no trust check
