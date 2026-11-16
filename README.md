@@ -172,7 +172,7 @@ Task notes and notes render the same Markdown, plus:
 
 | Syntax | Renders as |
 |---|---|
-| ```` ```mermaid ```` fence | Diagram (flowchart, sequence, class, state, ER, gantt, pie, …), rendered natively in the app's palette; invalid syntax shows the error and source |
+| ```` ```mermaid ```` fence | Diagram (flowchart, sequence, class, state, ER, gantt, pie, …), rendered natively with Mermaid's own layouts (as on GitHub), in the app's palette with one brand color per node; invalid syntax shows the error and source |
 | Leading `---` YAML block | Property rows (lists as pills) |
 | `![](https://…)` | Remote image (fetched by the app) |
 | `![](file.png)`, `~/…`, `/abs/…`, `file://…` | Local image; relative paths resolve against the note's folder (`notes/` or `tasks/<id>/`) |

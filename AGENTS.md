@@ -92,7 +92,7 @@ API source of truth: `~/.cargo/registry/src/*/{gpui-pre-0.3.12,gpui-base-0.9.1,g
 | Caret at a click on text that becomes an input | after it lays out (`text_bounds()` changed; retry `on_next_frame`), `window.dispatch_event` a MouseDown/Up clamped into it (`editor::replay_click`) |
 | Hover-only row actions | parent `.group(name)`, child `.opacity(0.).group_hover(name, \|s\| s.opacity(1.))`; group name unique per row |
 | Element IDs | tuple form `("prefix", u64)`; keep prefixes unique per view |
-| Mermaid look | palette built from the app theme in `diagram_theme`; renderer output post-processed in `polish_svg` (radii, edge width); canvas is transparent, so put it on an opaque surface |
+| Mermaid look | `merman` (Mermaid.js port, as in Zed); config from the app theme in `diagram_config`, one brand color per node in `accent_nodes`, root size + rounded boxes in `polish_svg`; labels measured with GPUI's text system in `DIAGRAM_FONT` (usvg can't see the system font). usvg rejects a duplicate attribute and then draws nothing: check a blank diagram with resvg 0.46 |
 | Box with `w_full` + `max_w` + `aspect_ratio` is far too tall | Taffy takes height from the unclamped width; also set `max_h` (see Mermaid in `components/markdown.rs`) |
 | SVG `img` shown larger than natural size is blurry (rasterized at natural × 2) | re-emit the SVG with scaled `width`/`height` (`scale_svg`) |
 | Synthetic Esc (CGEvent) ignored in UI checks | macOS routes Esc through the input context; set the event's unicode string to `\u{1b}` |

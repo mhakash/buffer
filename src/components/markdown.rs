@@ -24,8 +24,8 @@ use gpui_kit::component::{
 use gpui_kit::{
     App, CursorStyle, ElementId, Hsla, Image, ImageFormat, ImageSource, InteractiveElement,
     IntoElement, ObjectFit, ParentElement, Rgba, SharedString, SharedUri,
-    StatefulInteractiveElement, Styled, StyledImage, Window, div, img, prelude::FluentBuilder as _,
-    px, rems,
+    StatefulInteractiveElement, Styled, StyledImage, TextSystem, Window, div, img,
+    prelude::FluentBuilder as _, px, rems,
 };
 
 use std::time::{Duration, Instant};
@@ -160,9 +160,14 @@ fn diagram_surface(theme: &Theme) -> Hsla {
     theme.popover.opacity(1.)
 }
 
-/// Mermaid colors from the app palette: accent-tinted nodes on the card's surface, muted
-/// lines, pill labels. Transparent canvas so the card shows through.
-fn diagram_theme(theme: &Theme) -> mermaid_rs_renderer::Theme {
+/// The font labels are measured and drawn in. The rasterizer (usvg) can't see the hidden
+/// system font, so name one both it and GPUI's text system resolve the same way.
+const DIAGRAM_FONT: &str = "Helvetica Neue";
+
+/// Mermaid config from the app palette: neutral surface, muted lines, brand colors for
+/// nodes (see [`accent_nodes`]) and charts. `htmlLabels` lets merman wrap long labels; its
+/// raster-safe pipeline turns them into plain SVG text.
+fn diagram_config(theme: &Theme) -> serde_json::Value {
     let dark = theme.is_dark();
     let surface = diagram_surface(theme);
     let accent = theme.primary;
@@ -170,91 +175,189 @@ fn diagram_theme(theme: &Theme) -> mermaid_rs_renderer::Theme {
     let border = hex(mix(surface, accent, if dark { 0.5 } else { 0.32 }));
     let line = hex(mix(surface, theme.muted_foreground, 0.8));
     let text = hex(theme.foreground);
-    let note = hex(mix(surface, theme.chart_4, if dark { 0.18 } else { 0.12 }));
-    let note_border = hex(mix(surface, theme.chart_4, 0.45));
-    let charts = [
+    let bg = hex(surface);
+    let font = format!("\"{DIAGRAM_FONT}\", Helvetica, Arial, sans-serif");
+    let mut vars = serde_json::json!({
+        "darkMode": dark,
+        "fontFamily": font,
+        "fontSize": "14px",
+        "background": bg,
+        "primaryColor": node,
+        "primaryTextColor": text,
+        "primaryBorderColor": border,
+        "secondaryColor": node,
+        "secondaryTextColor": text,
+        "tertiaryColor": node,
+        "tertiaryTextColor": text,
+        "mainBkg": node,
+        "nodeBorder": border,
+        "nodeTextColor": text,
+        "lineColor": line,
+        "textColor": text,
+        "titleColor": text,
+        "labelTextColor": text,
+        "edgeLabelBackground": bg,
+        "clusterBkg": hex(mix(surface, accent, if dark { 0.06 } else { 0.03 })),
+        "clusterBorder": border,
+        "noteBkgColor": hex(mix(surface, theme.chart_4, if dark { 0.18 } else { 0.12 })),
+        "noteBorderColor": hex(mix(surface, theme.chart_4, 0.45)),
+        "noteTextColor": text,
+        "actorBkg": node,
+        "actorBorder": border,
+        "actorTextColor": text,
+        "actorLineColor": line,
+        "signalColor": text,
+        "signalTextColor": text,
+        "loopTextColor": text,
+        "activationBkgColor": node,
+        "activationBorderColor": border,
+        "classText": text,
+        "labelColor": text,
+        "pieTitleTextColor": text,
+        "pieSectionTextColor": text,
+        "pieLegendTextColor": text,
+        "pieStrokeColor": bg,
+        "pieOuterStrokeColor": border,
+        "pieOpacity": "1",
+    });
+    let charts = accents(theme);
+    if let Some(map) = vars.as_object_mut() {
+        for i in 0..12 {
+            let color = hex(mix(surface, charts[i % 5], if i < 5 { 0.85 } else { 0.5 }));
+            map.insert(format!("cScale{i}"), color.clone().into());
+            map.insert(format!("cScaleLabel{i}"), text.clone().into());
+            map.insert(format!("pie{}", i + 1), color.into());
+        }
+    }
+    serde_json::json!({
+        "theme": "base",
+        "look": "classic",
+        "darkMode": dark,
+        "fontFamily": font,
+        "htmlLabels": true,
+        "flowchart": { "htmlLabels": true, "padding": 16, "wrappingWidth": 200, "minNodeWidth": 0 },
+        "state": { "wrappingWidth": 200, "minNodeWidth": 0 },
+        "themeVariables": vars,
+    })
+}
+
+fn accents(theme: &Theme) -> [Hsla; 5] {
+    [
         theme.chart_1,
         theme.chart_2,
         theme.chart_3,
         theme.chart_4,
         theme.chart_5,
-    ];
-    let mut t = mermaid_rs_renderer::Theme::modern();
-    t.font_family = "\"SF Pro Text\", \"Helvetica Neue\", Helvetica, Arial, sans-serif".into();
-    t.font_size = 14.;
-    t.background = "none".into();
-    t.primary_color = node.clone();
-    t.secondary_color = node.clone();
-    t.tertiary_color = node.clone();
-    t.primary_border_color = border.clone();
-    t.primary_text_color = text.clone();
-    t.text_color = text.clone();
-    t.line_color = line.clone();
-    t.edge_label_background = hex(surface);
-    t.cluster_background = hex(mix(surface, accent, if dark { 0.06 } else { 0.03 }));
-    t.cluster_border = border.clone();
-    t.sequence_actor_fill = node.clone();
-    t.sequence_actor_border = border.clone();
-    t.sequence_actor_line = line;
-    t.sequence_note_fill = note;
-    t.sequence_note_border = note_border;
-    t.sequence_activation_fill = node;
-    t.sequence_activation_border = border.clone();
-    t.pie_colors = std::array::from_fn(|i| {
-        let amount = if i < 5 { 0.85 } else { 0.5 };
-        hex(mix(surface, charts[i % 5], amount))
-    });
-    t.pie_title_text_color = text.clone();
-    t.pie_section_text_color = text.clone();
-    t.pie_legend_text_color = text;
-    t.pie_stroke_color = hex(surface);
-    t.pie_outer_stroke_color = border;
-    t.pie_opacity = 1.;
-    t
+    ]
 }
 
-/// Mermaid.js strips quotes from `|"label"|` edge labels; the renderer shows them literally.
-fn unquote_edge_labels(source: &str) -> String {
-    let mut out = String::with_capacity(source.len());
-    let mut rest = source;
-    while let Some(start) = rest.find("|\"") {
-        let after = &rest[start + 2..];
-        // Only within one line, so a stray `|"` can't swallow the rest of the diagram.
-        let line_end = after.find('\n').unwrap_or(after.len());
-        match after[..line_end].find("\"|") {
-            Some(end) => {
-                out.push_str(&rest[..start + 1]);
-                out.push_str(&after[..end]);
-                out.push('|');
-                rest = &after[end + 2..];
-            }
-            None => {
-                out.push_str(&rest[..start + 2]);
-                rest = after;
-            }
-        }
-    }
-    out.push_str(rest);
-    out
-}
-
-/// Softer shapes than the renderer draws: rounder boxes, pill edge labels, thinner edges.
-fn polish_svg(svg: &str) -> String {
-    let svg = svg
-        .replace("rx=\"3\" ry=\"3\"", "rx=\"10\" ry=\"10\"")
-        // SVG clamps the radius to half the box: pills.
-        .replace("rx=\"2\" ry=\"2\"", "rx=\"99\" ry=\"99\"");
-    let mut out = String::with_capacity(svg.len());
-    let mut rest = svg.as_str();
-    while let Some(ix) = rest.find("class=\"edgePath\"") {
-        let (head, tail) = rest.split_at(ix);
+/// Gives each node the next brand color (stroke = color, fill = a tint over the surface), as
+/// Mermaid has no per-node colors. Nodes are `<g>`s whose class list has `node` or
+/// `stateGroup` (flowchart, class, state).
+fn accent_nodes(svg: &str, theme: &Theme) -> String {
+    let surface = diagram_surface(theme);
+    let colors = accents(theme);
+    let tint = if theme.is_dark() { 0.16 } else { 0.1 };
+    let text = hex(theme.foreground);
+    let mut out = String::with_capacity(svg.len() + 1024);
+    let mut rest = svg;
+    let mut count = 0;
+    const OPEN: &str = "<g class=\"";
+    while let Some(ix) = rest.find(OPEN) {
+        let (head, tail) = rest.split_at(ix + OPEN.len());
         out.push_str(head);
-        let tag_end = tail.find("/>").unwrap_or(tail.len());
-        out.push_str(&tail[..tag_end].replacen("stroke-width=\"2\"", "stroke-width=\"1.5\"", 1));
-        rest = &tail[tag_end..];
+        let class = &tail[..tail.find('"').unwrap_or(0)];
+        if class
+            .split_whitespace()
+            .any(|c| c == "node" || c == "stateGroup")
+        {
+            out.push_str(&format!("bf-accent-{} ", count % colors.len()));
+            count += 1;
+        }
+        rest = tail;
+    }
+    out.push_str(rest);
+    if count == 0 {
+        return out;
+    }
+    let mut css = String::new();
+    for (i, color) in colors.iter().enumerate() {
+        let (stroke, fill) = (hex(*color), hex(mix(surface, *color, tint)));
+        let c = format!(".bf-accent-{i}");
+        css.push_str(&format!(
+            "{c} rect, {c} path, {c} circle, {c} polygon, {c} ellipse \
+             {{ fill: {fill} !important; stroke: {stroke} !important; }}\n\
+             {c} text, {c} tspan {{ fill: {text} !important; }}\n"
+        ));
+    }
+    out.replacen("</style>", &(css + "</style>"), 1)
+}
+
+/// merman sizes the root for a browser (`width="100%"`, CSS `max-width`); the rasterizer needs
+/// the natural size as attributes. Also softer shapes: rounded boxes. Returns the size.
+fn polish_svg(svg: &str) -> Option<(String, (f32, f32))> {
+    let root_end = svg.find('>')?;
+    let (root, body) = svg.split_at(root_end);
+    let view_box = attr(root, "viewBox")?;
+    let nums: Vec<f32> = view_box
+        .split([' ', ','])
+        .filter_map(|n| n.parse().ok())
+        .collect();
+    let [_, _, w, h] = nums[..] else {
+        return None;
+    };
+    let mut root = root.to_string();
+    for (name, value) in [("width", w.to_string()), ("height", h.to_string())] {
+        set_attr(&mut root, name, &value);
+    }
+    if let Some(style) = attr(&root, "style") {
+        let kept = style
+            .split(';')
+            .filter(|d| !d.trim().is_empty() && !d.trim_start().starts_with("max-width"))
+            .collect::<Vec<_>>()
+            .join(";");
+        set_attr(&mut root, "style", &kept);
+    }
+    Some((root + &round_boxes(body), (w, h)))
+}
+
+/// Square node boxes get rounded corners; boxes that set their own radius keep it (a second
+/// `rx` would make the SVG invalid).
+fn round_boxes(svg: &str) -> String {
+    const BOX: &str = "<rect class=\"basic label-container\"";
+    let mut out = String::with_capacity(svg.len() + 256);
+    let mut rest = svg;
+    while let Some(ix) = rest.find(BOX) {
+        let (head, tail) = rest.split_at(ix + BOX.len());
+        out.push_str(head);
+        let tag = &tail[..tail.find('>').unwrap_or(tail.len())];
+        if attr(tag, "rx").is_none() && attr(tag, "ry").is_none() {
+            out.push_str(" rx=\"10\" ry=\"10\"");
+        }
+        rest = tail;
     }
     out.push_str(rest);
     out
+}
+
+fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let key = format!(" {name}=\"");
+    let start = tag.find(&key)? + key.len();
+    let len = tag[start..].find('"')?;
+    Some(&tag[start..start + len])
+}
+
+/// Replaces `name`'s value in a start tag, or adds the attribute.
+fn set_attr(tag: &mut String, name: &str, value: &str) {
+    let key = format!(" {name}=\"");
+    match tag.find(&key) {
+        Some(start) => {
+            let value_start = start + key.len();
+            let len = tag[value_start..].find('"').unwrap_or(0);
+            tag.replace_range(value_start..value_start + len, value);
+        }
+        None => tag.push_str(&format!("{key}{value}\"")),
+    }
 }
 
 /// The same SVG drawn `scale`× larger, so the full view rasterizes sharp.
@@ -279,43 +382,92 @@ fn scale_svg(svg: &str, (w, h): (f32, f32), scale: f32) -> String {
     root + body
 }
 
-fn render_diagram(source: &str, theme: &Theme) -> Result<Rendered, String> {
-    let palette = diagram_theme(theme);
+fn render_diagram(source: &str, theme: &Theme, text: Arc<TextSystem>) -> Result<Rendered, String> {
+    let config = diagram_config(theme);
     let mut hasher = DefaultHasher::new();
     source.hash(&mut hasher);
-    serde_json::to_string(&palette)
-        .unwrap_or_default()
-        .hash(&mut hasher);
+    config.to_string().hash(&mut hasher);
+    accents(theme).map(hex).hash(&mut hasher);
     let key = hasher.finish();
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     cache
         .entry(key)
         .or_insert_with(|| {
-            let mut options = mermaid_rs_renderer::RenderOptions {
-                theme: palette,
-                ..Default::default()
-            };
-            // Airier than the defaults: fewer crossings and labels that clear the lines.
-            options.layout.node_spacing = 60.;
-            options.layout.rank_spacing = 64.;
-            options.layout.node_padding_x = 22.;
-            options.layout.node_padding_y = 14.;
-            let source = unquote_edge_labels(source);
-            let size = mermaid_rs_renderer::measure(&source, options.clone())
-                .map_err(|e| format!("{e:#}"))?;
-            let svg = mermaid_rs_renderer::render_with_options(&source, options)
-                .map_err(|e| format!("{e:#}"))?;
-            let svg = polish_svg(&svg);
+            let svg = render_mermaid(source, config, text)?;
+            let svg = accent_nodes(&svg, theme);
+            let (svg, size) = polish_svg(&svg).ok_or("the renderer returned no size")?;
             Ok(Rendered {
                 image: Arc::new(Image::from_bytes(
                     ImageFormat::Svg,
                     svg.clone().into_bytes(),
                 )),
                 svg: svg.into(),
-                size: (size.width, size.height),
+                size,
             })
         })
         .clone()
+}
+
+/// Mermaid source → SVG, labels measured with the font they're drawn in so boxes fit them.
+fn render_mermaid(
+    source: &str,
+    config: serde_json::Value,
+    text: Arc<TextSystem>,
+) -> Result<String, String> {
+    use merman::svg::{
+        CssOverridePostprocessor, DeterministicTextMeasurer, MeasurementProfileId, SvgPipeline,
+        TextMeasurementPolicy, TextMeasurementProfile, TextMeasurementProfileIdentity,
+    };
+    let widths = Mutex::new(HashMap::<(String, u64, bool), f64>::new());
+    let measurer = DeterministicTextMeasurer::default().with_width_callback(move |s, style| {
+        let bold = style
+            .font_weight
+            .as_deref()
+            .is_some_and(|w| w == "bold" || w.parse::<u16>().is_ok_and(|w| w >= 600));
+        let key = (s.to_string(), style.font_size.to_bits(), bold);
+        let mut widths = widths.lock().unwrap_or_else(|e| e.into_inner());
+        *widths.entry(key).or_insert_with(|| {
+            let mut f = gpui_kit::font(DIAGRAM_FONT);
+            if bold {
+                f.weight = gpui_kit::FontWeight::BOLD;
+            }
+            let id = text.resolve_font(&f);
+            let size = px(style.font_size as f32);
+            s.chars()
+                .filter_map(|c| text.advance(id, size, c).ok())
+                .map(|a| f64::from(f32::from(a.width)))
+                .sum()
+        })
+    });
+    let id = MeasurementProfileId::new("buffer").map_err(|e| format!("{e:#}"))?;
+    let profile = TextMeasurementProfile::new(
+        TextMeasurementProfileIdentity::new(id, "1").map_err(|e| format!("{e:#}"))?,
+        measurer,
+    );
+    let request = merman::SvgRequest {
+        environment: merman::SvgEnvironment::deterministic()
+            .with_text_measurement_policy(TextMeasurementPolicy::uniform(profile)),
+        // Our CSS (accents) must win over the renderer's own `!important` rules.
+        pipeline: Some(
+            SvgPipeline::resvg_safe()
+                .with_postprocessor(CssOverridePostprocessor::strip_existing_important()),
+        ),
+        ..merman::SvgRequest::default()
+    };
+    let output = merman::Renderer::new()
+        .with_engine(
+            merman::Engine::new().with_site_config(merman::MermaidConfig::from_value(config)),
+        )
+        .render(merman::RenderRequest::svg(
+            source,
+            merman::OperationControl::new(),
+            request,
+        ))
+        .map_err(|e| format!("{e:#}"))?;
+    let merman::RenderOutput::Svg(Some(svg)) = output else {
+        return Err("nothing to draw".into());
+    };
+    Ok(svg.into_parts().0)
 }
 
 /// Opens a diagram in the full view, re-rendered large enough to stay sharp.
@@ -389,7 +541,7 @@ impl MarkdownPlugin for MermaidPlugin {
             .border_1()
             .border_color(theme.border)
             .bg(diagram_surface(theme));
-        match render_diagram(source, theme) {
+        match render_diagram(source, theme, cx.text_system().clone()) {
             // Natural size, shrunk to the column. `img` alone keeps its intrinsic height when
             // shrunk, so a box sized by aspect ratio carries the layout and the image fills it.
             // Taffy derives the height from the full-column width before `max_w` clamps it, so
@@ -901,10 +1053,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unquotes_edge_labels() {
+    fn rounds_only_boxes_without_a_radius() {
         assert_eq!(
-            unquote_edge_labels("A -->|\"read\"| B\nC -->|plain| D\nE --> F[\"|\"]"),
-            "A -->|read| B\nC -->|plain| D\nE --> F[\"|\"]"
+            round_boxes(
+                "<rect class=\"basic label-container\" x=\"1\"/><rect class=\"basic label-container\" rx=\"5\" ry=\"5\"/>"
+            ),
+            "<rect class=\"basic label-container\" rx=\"10\" ry=\"10\" x=\"1\"/><rect class=\"basic label-container\" rx=\"5\" ry=\"5\"/>"
         );
     }
 
