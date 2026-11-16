@@ -13,7 +13,10 @@ use gpui_kit::{
 };
 
 use super::{BlockEditor, Caret, model::Kind, selection::Selection, slash::block_types};
-use crate::blocks::model::fence_type;
+use crate::blocks::{
+    self,
+    model::{fence_type, parse_config},
+};
 
 pub(super) struct BlockMenu {
     menu: Entity<PopupMenu>,
@@ -35,8 +38,8 @@ impl BlockEditor {
             Some(sel) if sel.contains(ix) => sel.range(),
             _ => ix..ix + 1,
         };
-        // A single custom block gets "Edit config": its output can be long, and the Edit line
-        // under it far away.
+        // A single custom block gets "Edit config" and "Refresh": its output can be long, and
+        // the meta line under it far away.
         let custom = range.len() == 1
             && matches!(&self.doc.blocks[range.start].kind, Kind::Code(lang) if fence_type(lang).is_some());
         self.select(Selection::span(range.clone()), window, cx);
@@ -107,6 +110,23 @@ fn build(
             "Edit config",
             IconName::Pencil,
             |editor, range, window, cx| editor.activate(range.start, Caret::End, window, cx),
+        ))
+        .item(item(
+            "Refresh",
+            IconName::RefreshCw,
+            |editor, range, _, cx| {
+                let block = &editor.doc.blocks[range.start];
+                let Kind::Code(lang) = &block.kind else {
+                    return;
+                };
+                let config = parse_config(&block.text);
+                if let Some(ty) = fence_type(lang)
+                    .and_then(|name| blocks::find(name, cx))
+                    .cloned()
+                {
+                    blocks::refresh(&ty, &config, cx);
+                }
+            },
         ))
         .separator()
     } else {
