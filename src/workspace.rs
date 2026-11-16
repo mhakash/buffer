@@ -1,9 +1,14 @@
 //! Root view of the main window: ambient backdrop, title bar, sidebar and the active page.
 
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 use chrono::Local;
-use gpui_kit::component::{ActiveTheme, Icon, Sizable, Theme, TitleBar, WindowExt, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme, Icon, Sizable, Theme, TitleBar, WindowExt, h_flex,
+    menu::{DropdownMenu, PopupMenuItem},
+    sidebar::SidebarHeader,
+    v_flex,
+};
 use gpui_kit::{
     AnimationExt, AnyView, Context, DragMoveEvent, Entity, FocusHandle, FontWeight, SharedString,
     SpringAnimation, SpringConfig, Subscription, Task, Window, assets::IconName, div, prelude::*,
@@ -13,7 +18,8 @@ use gpui_kit::{
 use crate::{
     APP_NAME,
     actions::{
-        CloseWindow, NewNote, NewTask, ShowFocus, ShowNotes, ShowSettings, ShowTasks, ToggleTimer,
+        CloseWindow, NewNote, NewTask, NewWorkspace, ShowFocus, ShowNotes, ShowSettings, ShowTasks,
+        ToggleTimer,
     },
     components::{
         fx::{self, SPRING},
@@ -27,6 +33,7 @@ use crate::{
     prefs, quotes,
     tasks::{TaskStore, completions_by_day, streak},
     theme::{self, Appearance},
+    workspaces,
 };
 
 const NAV_ITEM_H: f32 = 40.;
@@ -49,12 +56,27 @@ pub struct Workspace {
     notes: Entity<NotesPage>,
     settings: Entity<SettingsPage>,
     detail: Entity<TaskDetail>,
+    /// Root of the workspace the stores were loaded from.
+    root: PathBuf,
     _clock: Task<()>,
+    _registry: Subscription,
     _subscriptions: Vec<Subscription>,
 }
 
-impl Workspace {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+/// Everything that belongs to one workspace; rebuilt when the active workspace changes.
+struct Content {
+    store: Entity<TaskStore>,
+    timer: Entity<FocusTimer>,
+    tasks: Entity<TasksPage>,
+    focus: Entity<FocusPage>,
+    notes: Entity<NotesPage>,
+    settings: Entity<SettingsPage>,
+    detail: Entity<TaskDetail>,
+    subscriptions: Vec<Subscription>,
+}
+
+impl Content {
+    fn load(window: &mut Window, cx: &mut Context<Workspace>) -> Self {
         let store = cx.new(TaskStore::load);
         let timer = cx.new(FocusTimer::load);
         let tasks = cx.new(|cx| TasksPage::new(store.clone(), window, cx));
@@ -62,7 +84,39 @@ impl Workspace {
         let notes = cx.new(|cx| NotesPage::new(store.clone(), window, cx));
         let settings = cx.new(|cx| SettingsPage::new(store.clone(), window, cx));
         let detail = cx.new(|cx| TaskDetail::new(store.clone(), window, cx));
+        let subscriptions = vec![
+            cx.observe(&store, |_, _, cx| cx.notify()),
+            cx.observe(&timer, |_, _, cx| cx.notify()),
+            cx.subscribe_in(&tasks, window, |this, _, e: &OpenTask, window, cx| {
+                this.open_task(e.0, window, cx)
+            }),
+            cx.subscribe_in(&focus, window, |this, _, e: &OpenTask, window, cx| {
+                this.open_task(e.0, window, cx)
+            }),
+            cx.subscribe(&detail, |this, _, event: &DetailEvent, cx| match event {
+                DetailEvent::Close => {
+                    this.tasks.update(cx, |t, cx| t.set_selected(None, cx));
+                    cx.notify();
+                }
+                DetailEvent::Layout => cx.notify(),
+            }),
+        ];
+        Self {
+            store,
+            timer,
+            tasks,
+            focus,
+            notes,
+            settings,
+            detail,
+            subscriptions,
+        }
+    }
+}
 
+impl Workspace {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let content = Content::load(window, cx);
         // Focusing during window construction is dropped; wait until the window exists.
         cx.defer_in(window, |this, window, cx| {
             this.navigate(Page::Tasks, window, cx)
@@ -78,36 +132,47 @@ impl Workspace {
                 }
             }
         });
+        let registry = cx.observe_global_in::<workspaces::Registry>(window, |this, window, cx| {
+            let root = workspaces::get(cx).active().root();
+            if root != this.root {
+                this.root = root;
+                this.reload(window, cx);
+            }
+        });
 
         Self {
             focus_handle: cx.focus_handle(),
             active: Page::Tasks,
-            _subscriptions: vec![
-                cx.observe(&store, |_, _, cx| cx.notify()),
-                cx.observe(&timer, |_, _, cx| cx.notify()),
-                cx.subscribe_in(&tasks, window, |this, _, e: &OpenTask, window, cx| {
-                    this.open_task(e.0, window, cx)
-                }),
-                cx.subscribe_in(&focus, window, |this, _, e: &OpenTask, window, cx| {
-                    this.open_task(e.0, window, cx)
-                }),
-                cx.subscribe(&detail, |this, _, event: &DetailEvent, cx| match event {
-                    DetailEvent::Close => {
-                        this.tasks.update(cx, |t, cx| t.set_selected(None, cx));
-                        cx.notify();
-                    }
-                    DetailEvent::Layout => cx.notify(),
-                }),
-            ],
+            root: workspaces::get(cx).active().root(),
+            store: content.store,
+            timer: content.timer,
+            tasks: content.tasks,
+            focus: content.focus,
+            notes: content.notes,
+            settings: content.settings,
+            detail: content.detail,
             _clock: clock,
-            store,
-            timer,
-            tasks,
-            focus,
-            notes,
-            settings,
-            detail,
+            _registry: registry,
+            _subscriptions: content.subscriptions,
         }
+    }
+
+    fn set_content(&mut self, content: Content) {
+        self.store = content.store;
+        self.timer = content.timer;
+        self.tasks = content.tasks;
+        self.focus = content.focus;
+        self.notes = content.notes;
+        self.settings = content.settings;
+        self.detail = content.detail;
+        self._subscriptions = content.subscriptions;
+    }
+
+    /// The active workspace changed: drop every store and page and load them from the new root.
+    fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let content = Content::load(window, cx);
+        self.set_content(content);
+        self.navigate(self.active, window, cx);
     }
 
     fn open_task(&mut self, id: crate::tasks::Id, window: &mut Window, cx: &mut Context<Self>) {
@@ -170,7 +235,7 @@ impl Workspace {
             )
     }
 
-    fn render_brand(&self, theme: &Theme) -> impl IntoElement {
+    fn render_brand(&self, theme: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
         // Same 2x2 tile grid as the app icon (scripts/make_icon.swift), scaled from 824px.
         let tile =
             |solid: bool| {
@@ -193,21 +258,70 @@ impl Workspace {
                     .child(h_flex().gap(gap).child(tile(true)).child(tile(false)))
                     .child(h_flex().gap(gap).child(tile(false)).child(tile(false))),
             );
-        h_flex().gap_3().px_2().child(mark).child(
-            v_flex()
-                .child(
-                    div()
-                        .text_base()
-                        .font_weight(FontWeight::BOLD)
-                        .child(APP_NAME),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(format!("v{}", env!("CARGO_PKG_VERSION"))),
-                ),
-        )
+        let name = workspaces::get(cx).active().name.clone();
+        let mut header = SidebarHeader::new();
+        header.interactivity().element_id = Some("workspace-switcher".into());
+        // Notion-style: the brand block is the workspace switcher.
+        header
+            .group("workspace-switcher")
+            .gap_3()
+            .p_1()
+            .rounded_xl()
+            .cursor_pointer()
+            .child(mark)
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_base()
+                            .font_weight(FontWeight::BOLD)
+                            .child(APP_NAME),
+                    )
+                    .child(
+                        h_flex()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(div().min_w_0().truncate().child(name))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .child(format!(" · v{}", env!("CARGO_PKG_VERSION"))),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .opacity(0.)
+                    .group_hover("workspace-switcher", |s| s.opacity(1.))
+                    .child(
+                        Icon::new(IconName::ChevronsUpDown)
+                            .xsmall()
+                            .text_color(theme.muted_foreground),
+                    ),
+            )
+            .dropdown_menu(|mut menu, _, cx| {
+                let registry = workspaces::get(cx);
+                let active = registry.active().id;
+                for entry in registry.entries().to_vec() {
+                    let id = entry.id;
+                    menu = menu.item(
+                        PopupMenuItem::new(entry.name)
+                            .checked(id == active)
+                            .on_click(move |_, _, cx| workspaces::switch(id, cx)),
+                    );
+                }
+                menu.separator()
+                    .menu_with_icon("New workspace…", IconName::Plus, Box::new(NewWorkspace))
+                    .item(
+                        PopupMenuItem::new("Open folder…")
+                            .icon(IconName::FolderOpen)
+                            .on_click(|_, _, cx| workspaces::prompt_open_folder(cx)),
+                    )
+                    .min_w(px(220.))
+            })
     }
 
     fn render_nav(&self, theme: &Theme, ambient: bool, cx: &mut Context<Self>) -> impl IntoElement {
@@ -386,7 +500,7 @@ impl Workspace {
             .bg(theme.sidebar)
             .border_1()
             .border_color(theme.border)
-            .child(self.render_brand(theme))
+            .child(self.render_brand(theme, cx))
             .child(self.render_nav(theme, ambient, cx))
             .child(div().flex_1())
             .child(self.render_today_card(theme, cx))
@@ -490,6 +604,11 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &ShowSettings, window, cx| {
                 this.navigate(Page::Settings, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &NewWorkspace, window, cx| {
+                this.navigate(Page::Settings, window, cx);
+                this.settings
+                    .update(cx, |s, cx| s.focus_new_workspace(window, cx));
             }))
             .on_action(cx.listener(|this, _: &ToggleTimer, _, cx| {
                 this.timer.update(cx, |timer, cx| timer.toggle(cx));

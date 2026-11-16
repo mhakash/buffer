@@ -1,4 +1,5 @@
-//! User preferences (`settings.json`), held as a GPUI global.
+//! User preferences (`settings.json`), held as a GPUI global. App-level (in `storage::app_dir`),
+//! so they stay the same across workspaces.
 
 use gpui_kit::{App, Global};
 use serde::{Deserialize, Serialize};
@@ -45,7 +46,7 @@ impl Default for Prefs {
 impl Global for Prefs {}
 
 pub fn init(cx: &mut App) {
-    let prefs: Prefs = storage::load(FILE);
+    let prefs: Prefs = storage::load_app(FILE);
     cx.set_global(prefs);
 }
 
@@ -59,7 +60,7 @@ pub fn set_detail_width(cx: &mut App, width: f32) {
 }
 
 pub fn save(cx: &App) {
-    if let Err(err) = storage::save(FILE, cx.global::<Prefs>()) {
+    if let Err(err) = storage::save_app(FILE, cx.global::<Prefs>()) {
         eprintln!("failed to save settings: {err:#}");
     }
 }

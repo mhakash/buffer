@@ -1,8 +1,15 @@
-//! JSON persistence under the OS data dir (`~/Library/Application Support/Buffer` on macOS).
+//! JSON persistence. Two roots, both resolved here and nowhere else:
+//! - [`app_dir`]: app-level config (`settings.json`, the workspace registry). `~/Library/Application
+//!   Support/Buffer` on macOS, or `$BUFFER_DATA_DIR`.
+//! - [`data_dir`]: the active workspace's root, which holds all content (tasks, notes, focus,
+//!   images). Set by [`crate::workspaces`]; the default workspace is the app dir itself.
+//!
+//! Content paths are always relative to [`data_dir`] (`load`, `save`, `path`, …).
 
 use std::{
     fs, io,
     path::{Path, PathBuf},
+    sync::RwLock,
 };
 
 use anyhow::Context as _;
@@ -13,9 +20,12 @@ use crate::APP_NAME;
 /// The app was called Workdesk before 0.11; its data folder is moved on first launch.
 const LEGACY_NAME: &str = "Workdesk";
 
-/// `BUFFER_DATA_DIR` (or the pre-rename `WORKDESK_DATA_DIR`) overrides the location, for
-/// testing against throwaway data.
-pub fn data_dir() -> PathBuf {
+/// Active workspace root; `None` until [`set_root`] = the app dir.
+static ROOT: RwLock<Option<PathBuf>> = RwLock::new(None);
+
+/// App-level config folder. `BUFFER_DATA_DIR` (or the pre-rename `WORKDESK_DATA_DIR`) overrides
+/// the location, for testing against throwaway data.
+pub fn app_dir() -> PathBuf {
     if let Some(dir) =
         std::env::var_os("BUFFER_DATA_DIR").or_else(|| std::env::var_os("WORKDESK_DATA_DIR"))
     {
@@ -29,6 +39,21 @@ pub fn data_dir() -> PathBuf {
         return legacy;
     }
     dir
+}
+
+/// Root folder of the active workspace: every content file lives under it.
+pub fn data_dir() -> PathBuf {
+    ROOT.read()
+        .ok()
+        .and_then(|root| root.clone())
+        .unwrap_or_else(app_dir)
+}
+
+/// Points all content loads and saves at another workspace root.
+pub fn set_root(dir: PathBuf) {
+    if let Ok(mut root) = ROOT.write() {
+        *root = Some(dir);
+    }
 }
 
 /// Moves the pre-rename data folder to its new name, once. Call before anything loads.
@@ -60,12 +85,30 @@ pub fn path(rel: &str) -> PathBuf {
 /// Loads `file`, falling back to `T::default()` when it doesn't exist yet.
 /// A file that can't be parsed is moved aside (never overwritten) so no data is lost.
 pub fn load<T: DeserializeOwned + Default>(file: &str) -> T {
-    let path = data_dir().join(file);
-    match fs::read(&path) {
+    load_from(&path(file))
+}
+
+/// Writes atomically: a crash mid-write leaves the previous file intact.
+pub fn save<T: Serialize>(file: &str, value: &T) -> anyhow::Result<()> {
+    write_atomic(&path(file), &serde_json::to_vec_pretty(value)?)
+}
+
+/// [`load`] for app-level config in [`app_dir`] (not workspace content).
+pub fn load_app<T: DeserializeOwned + Default>(file: &str) -> T {
+    load_from(&app_dir().join(file))
+}
+
+/// [`save`] for app-level config in [`app_dir`] (not workspace content).
+pub fn save_app<T: Serialize>(file: &str, value: &T) -> anyhow::Result<()> {
+    write_atomic(&app_dir().join(file), &serde_json::to_vec_pretty(value)?)
+}
+
+fn load_from<T: DeserializeOwned + Default>(path: &Path) -> T {
+    match fs::read(path) {
         Ok(bytes) => match serde_json::from_slice(&bytes) {
             Ok(value) => value,
             Err(err) => {
-                let backup = quarantine(&path);
+                let backup = quarantine(path);
                 eprintln!(
                     "{} is unreadable ({err}); moved to {}",
                     path.display(),
@@ -80,11 +123,6 @@ pub fn load<T: DeserializeOwned + Default>(file: &str) -> T {
             T::default()
         }
     }
-}
-
-/// Writes atomically: a crash mid-write leaves the previous file intact.
-pub fn save<T: Serialize>(file: &str, value: &T) -> anyhow::Result<()> {
-    write_atomic(file, &serde_json::to_vec_pretty(value)?)
 }
 
 /// Reads a text file; missing or unreadable → empty.
@@ -110,7 +148,7 @@ pub fn save_text(file: &str, text: &str) -> anyhow::Result<()> {
             _ => Ok(()),
         };
     }
-    write_atomic(file, text.as_bytes())
+    write_atomic(&path(file), text.as_bytes())
 }
 
 /// Removes a directory and everything in it; missing is fine.
@@ -130,16 +168,15 @@ pub fn copy(from: &str, to: &str) -> anyhow::Result<()> {
 }
 
 /// A crash mid-write leaves the previous file intact.
-fn write_atomic(file: &str, bytes: &[u8]) -> anyhow::Result<()> {
-    let path = path(file);
+fn write_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    let mut tmp = path.clone().into_os_string();
+    let mut tmp = path.to_path_buf().into_os_string();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
     fs::write(&tmp, bytes).with_context(|| format!("writing {}", tmp.display()))?;
-    fs::rename(&tmp, &path).with_context(|| format!("replacing {}", path.display()))?;
+    fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))?;
     Ok(())
 }
 

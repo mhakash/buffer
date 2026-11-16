@@ -40,8 +40,26 @@ Bump `version` in `Cargo.toml` with each feature; it shows in the status bar and
 
 ## Data
 
-`~/Library/Application Support/Buffer/` (Settings → Data → Show in Finder). A pre-rename
-`Workdesk` folder is moved there on first launch.
+### Workspaces
+
+A workspace is a root folder holding all content (tasks, notes, focus history, images). Switch with
+the brand block at the top of the sidebar (click → pick one, **New workspace…**, **Open folder…**)
+or in Settings → Workspaces (click a row to switch; edit the active one's name in place; hover a
+row to reveal it in Finder or remove it from the list — its files stay on disk). Switching reloads
+every page; a running focus timer is dropped.
+
+| Location | Contents |
+|---|---|
+| App dir: `~/Library/Application Support/Buffer/` (or `$BUFFER_DATA_DIR`) | `settings.json` + `workspaces.json` (app-level, shared by all workspaces); also the root of the default workspace (**Personal**), so pre-0.16 data loads unchanged. A pre-rename `Workdesk` folder is moved here on first launch. |
+| `<app dir>/Workspaces/<name>/` | Root of a workspace made with **New workspace** |
+| any folder | Root of a workspace added with **Open folder…** (e.g. a synced folder) |
+
+`workspaces.json`: `{"active": <id>, "workspaces": [{"id", "name", "path"}]}`; no `path` = the app dir.
+A missing file means just the default workspace.
+
+### Files in a workspace root
+
+Settings → Data → Show in Finder opens the active one.
 
 | File | Contents |
 |---|---|
@@ -50,12 +68,12 @@ Bump `version` in `Cargo.toml` with each feature; it shows in the status bar and
 | `tasks/<id>/notes.md` | That task's notes (plain Markdown; edit it in any editor while the app is closed) |
 | `notes.json` | Notes index: ids, created/edited times, tags, properties |
 | `notes/<id>.md` | One standalone note (plain Markdown) |
-| `settings.json` | Theme, your name (greeting), ambient motion on/off. |
 | `focus.json` | Focus length + log of finished focus sessions. |
 
 Every file is written atomically; editing a task rewrites only its own folder (notes: only `notes.md`).
 Pre-0.7 data (everything inline in `tasks.json`) is split into folders on first launch, after copying
-the original to `tasks.v1-backup.json`.
+the original to `tasks.v1-backup.json`. App-level: `settings.json` = theme, your name (greeting),
+ambient motion on/off, detail-panel width.
 
 An unreadable file is renamed `*.corrupt-<timestamp>.json`, never overwritten. When changing the
 format, add fields with `#[serde(default)]` (`src/tasks/model.rs`) so old files still load.
@@ -180,7 +198,8 @@ pulsing indicators (saves battery). macOS "Reduce motion" is honoured by every a
 |---|---|
 | `src/main.rs` | App entry, window, Dock reopen |
 | `src/actions.rs` | Actions, key bindings, menu bar |
-| `src/storage.rs` | JSON load/save in the data dir |
+| `src/storage.rs` | JSON load/save; the only place paths are resolved: `data_dir()` = active workspace root (content), `app_dir()` = app config |
+| `src/workspaces.rs` | Workspace registry (`workspaces.json`) as a global: create, open folder, switch, rename, remove |
 | `src/prefs.rs` | `settings.json` (appearance, name, ambient) as a global |
 | `src/theme.rs` | Light/dark appearance over gpui-kit's `Theme`; loads `themes/` |
 | `src/focus/` | `FocusTimer` entity (pomodoro state, `focus.json`) |

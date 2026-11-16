@@ -28,7 +28,8 @@ Done = `cargo fmt` + `cargo build` with **zero warnings** + `cargo test` green. 
 ```
 main.rs        gpui_kit::application(), gpui_kit::open_window (wraps view in kit Root), Dock reopen
 actions.rs     actions!(), key bindings (bind()), menu bar
-storage.rs     load/save JSON in data_dir()
+storage.rs     load/save JSON; sole path resolver: data_dir() = active workspace root, app_dir() = app config
+workspaces.rs  workspace registry (workspaces.json in app_dir) as a Global; switching re-points storage, Workspace rebuilds stores + pages
 prefs.rs       settings.json (appearance, name, ambient) as a Global; prefs::update saves + repaints
 theme.rs       Appearance → kit Theme; loads themes/buffer.json (watched in debug)
 workspace.rs   root view: aurora | TitleBar | custom sidebar | active page; owns TaskStore + FocusTimer
@@ -55,7 +56,8 @@ net.rs        HttpClient for GPUI (ureq on a thread); without it remote images n
 
 ## Persistence rules
 
-- Data dir: `storage::data_dir()` (`~/Library/Application Support/Buffer`, or `$BUFFER_DATA_DIR`; legacy `WORKDESK_DATA_DIR` still honoured). The app was **Workdesk** before 0.11: `storage::migrate_legacy_dir` renames the old folder on first launch, and `data_dir` falls back to it if that failed.
+- App dir: `storage::app_dir()` (`~/Library/Application Support/Buffer`, or `$BUFFER_DATA_DIR`; legacy `WORKDESK_DATA_DIR` still honoured) holds app-level config (`settings.json`, `workspaces.json`; `storage::{load_app, save_app}`) and is the default workspace's root. The app was **Workdesk** before 0.11: `storage::migrate_legacy_dir` renames the old folder on first launch, and `app_dir` falls back to it if that failed.
+- Content dir: `storage::data_dir()` = active workspace root (`storage::set_root`, called only by `workspaces`). Content paths are always relative strings through `storage::{load, save, path, …}` — never build one from another base. Stores are rebuilt on switch (`workspace::Content`), so nothing may cache a root.
 - Tasks are split: list fields in `tasks.json` (index, `DATA_VERSION` 2); details in `tasks/<id>/task.json` + `notes.md`. Detail fields on `Task` are `#[serde(default, skip_serializing)]` (read from v1 for migration, never written to the index). Save details with `commit_task`, notes with `commit_notes`, index with `commit`.
 - Format changes must stay backward compatible: new fields get `#[serde(default)]`; never rename/remove fields without a migration in `TaskData`. Old user files must still load.
 - `storage::load` quarantines unparseable files; don't replace that with a silent default.

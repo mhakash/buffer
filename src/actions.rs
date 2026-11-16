@@ -17,6 +17,7 @@ actions!(
         NewNote,
         ShowSettings,
         ToggleTimer,
+        NewWorkspace,
     ]
 );
 

@@ -11,6 +11,7 @@ mod storage;
 mod tasks;
 mod theme;
 mod workspace;
+mod workspaces;
 
 use gpui_kit::component::TitleBar;
 use gpui_kit::{App, AppContext, Bounds, WindowBounds, WindowOptions, px, size};
@@ -32,6 +33,7 @@ fn main() {
     app.run(|cx: &mut App| {
         gpui_kit::init(cx);
         cx.set_http_client(net::Client::new());
+        workspaces::init(cx);
         prefs::init(cx);
         theme::init(cx);
         actions::init(cx);
