@@ -11,9 +11,6 @@
 //! State is the [`Blocks`] global, reloaded per workspace by [`load`]. Runs happen on a thread;
 //! a finished run updates the global and repaints every window, so renderers just read [`status`].
 
-// Editing block types (`store::save`, …) is for the Blocks page, still to come.
-#![allow(dead_code)]
-
 pub mod model;
 pub mod runner;
 pub mod store;
@@ -27,7 +24,7 @@ use std::{
 
 use chrono::Utc;
 use futures::channel::oneshot;
-use gpui_kit::{App, Global};
+use gpui_kit::{App, Global, SharedString, assets::IconName};
 
 use crate::storage;
 use model::{BlockType, Config, Output};
@@ -67,6 +64,17 @@ pub fn types(cx: &App) -> &[BlockType] {
     cx.try_global::<Blocks>()
         .map(|b| b.types.as_slice())
         .unwrap_or_default()
+}
+
+/// Asset path of a block type's icon: any Lucide name (`list-checks`), else a default.
+pub fn icon_path(ty: &BlockType, cx: &App) -> SharedString {
+    let name = ty.icon.trim();
+    let path = format!("icons/{name}.svg");
+    if !name.is_empty() && matches!(cx.asset_source().load(&path), Ok(Some(_))) {
+        path.into()
+    } else {
+        IconName::Zap.path()
+    }
 }
 
 pub fn find<'a>(name: &str, cx: &'a App) -> Option<&'a BlockType> {

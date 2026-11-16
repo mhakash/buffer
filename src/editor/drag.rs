@@ -62,6 +62,9 @@ fn preview_label(block: &Block) -> SharedString {
     match &block.kind {
         Kind::Divider => "Divider".into(),
         Kind::Code(lang) if lang == "mermaid" => "Diagram".into(),
+        Kind::Code(lang) if let Some(name) = crate::blocks::model::fence_type(lang) => {
+            format!("Block · {name}").into()
+        }
         Kind::Code(_) => "Code".into(),
         Kind::Raw => "Markdown".into(),
         _ => {

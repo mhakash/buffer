@@ -1,6 +1,9 @@
 //! Block types on disk, in the active workspace: `blocks/<name>/block.json` + its script.
 //! Cached results: `.cache/blocks/<key>.json`.
 
+// `script`, `save`, `remove`: for the Blocks page, still to come.
+#![allow(dead_code)]
+
 use super::model::{BlockType, Output, valid_name};
 use crate::storage;
 

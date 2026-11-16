@@ -11,7 +11,7 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, ClickEvent, Context, FontWeight, Hsla, MouseButton, MouseDownEvent,
+    AnyElement, App, ClickEvent, Context, FontWeight, Hsla, MouseButton, MouseDownEvent,
     assets::IconName, canvas, div, prelude::*, px, rems,
 };
 
@@ -19,6 +19,7 @@ use super::{
     BlockEditor,
     model::{Kind, inline_markdown},
 };
+use crate::blocks::{self, model::ParamKind};
 use crate::components::{document_style, markdown_style, markdown_view};
 
 const INDENT: f32 = 24.;
@@ -194,6 +195,7 @@ impl BlockEditor {
                                 .when(code_like, |t| t.font_family(theme.mono_font_family.clone())),
                         ),
                 )
+                .children(block_hint(kind, theme, cx))
                 .when(self.slash.is_some(), |this| {
                     this.child(self.render_slash(theme, cx))
                 })
@@ -318,4 +320,43 @@ impl BlockEditor {
             .child(self.render_grip(ix, theme, cx))
             .into_any_element()
     }
+}
+
+/// Under a custom block's config while it's edited: which block it is and the params it takes.
+fn block_hint(kind: &Kind, theme: &Theme, cx: &App) -> Option<AnyElement> {
+    let Kind::Code(lang) = kind else { return None };
+    let name = blocks::model::fence_type(lang)?;
+    let text = match blocks::find(name, cx) {
+        Some(ty) if ty.params.is_empty() => ty.label().to_string(),
+        Some(ty) => {
+            let params = ty
+                .params
+                .iter()
+                .map(|p| {
+                    let kind = match p.kind {
+                        ParamKind::Text => "text",
+                        ParamKind::Number => "number",
+                        ParamKind::Bool => "yes/no",
+                    };
+                    if p.default.is_empty() {
+                        format!("{} ({kind})", p.name)
+                    } else {
+                        format!("{} ({kind}, default {})", p.name, p.default)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" · ");
+            format!("{} — {params}", ty.label())
+        }
+        None => format!("Unknown block type “{name}”"),
+    };
+    Some(
+        div()
+            .mt_1()
+            .px_3()
+            .text_xs()
+            .text_color(theme.muted_foreground)
+            .child(text)
+            .into_any_element(),
+    )
 }

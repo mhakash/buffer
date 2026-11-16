@@ -601,7 +601,7 @@ impl MarkdownPlugin for BlockPlugin {
             (None, false) => "Not run yet".to_string(),
         };
         let icon = Icon::empty()
-            .path(block_icon(&ty.icon, cx))
+            .path(blocks::icon_path(&ty, cx))
             .small()
             .text_color(theme.muted_foreground);
         let ambient = crate::prefs::get(cx).ambient;
@@ -713,16 +713,6 @@ impl MarkdownPlugin for BlockPlugin {
             .children(body)
             .children(error)
             .into_any_element()
-    }
-}
-
-/// A block type's icon: any Lucide name (`list-checks`), else a default.
-fn block_icon(name: &str, cx: &App) -> SharedString {
-    let path = format!("icons/{}.svg", name.trim());
-    if !name.trim().is_empty() && matches!(cx.asset_source().load(&path), Ok(Some(_))) {
-        path.into()
-    } else {
-        IconName::Zap.path()
     }
 }
 
