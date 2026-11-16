@@ -5,8 +5,8 @@ Personal work app (formerly **Workdesk**; data and install migrate automatically
 Desktop app for custom work tooling, built on [GPUI](https://gpui.rs/) (Zed's UI framework) via
 [GPUI Kit](https://gpui-kit.com) (GPUI + ready-made components, Lucide icons, JSON themes).
 Aurora-styled UI (drifting glow, springy nav, animated progress) with a task list, a daily
-dashboard (greeting, streak, 7-day chart, progress ring), standalone Markdown notes and a pomodoro
-Focus timer.
+dashboard (greeting, streak, 7-day chart, progress ring), standalone Markdown notes with custom
+script-driven blocks (e.g. live Jira lists) and a pomodoro Focus timer.
 
 ## Install / update
 
@@ -54,7 +54,8 @@ every page; a running focus timer is dropped.
 | `<app dir>/Workspaces/<name>/` | Root of a workspace made with **New workspace** |
 | any folder | Root of a workspace added with **Open folder…** (e.g. a synced folder) |
 
-`workspaces.json`: `{"active": <id>, "workspaces": [{"id", "name", "path"}]}`; no `path` = the app dir.
+`workspaces.json`: `{"active": <id>, "workspaces": [{"id", "name", "path", "blocks_trusted"}]}`; no `path` =
+the app dir; `blocks_trusted` (omitted = false) lets custom blocks run their scripts.
 A missing file means just the default workspace.
 
 ### Files in a workspace root
@@ -69,6 +70,8 @@ Settings → Data → Show in Finder opens the active one.
 | `notes.json` | Notes index: ids, created/edited times, tags, properties |
 | `notes/<id>.md` | One standalone note (plain Markdown) |
 | `focus.json` | Focus length + log of finished focus sessions. |
+| `blocks/<name>/block.json` + script | A custom block type (see Custom blocks) |
+| `.cache/blocks/<key>.json` | Last output of each custom block (safe to delete) |
 
 Every file is written atomically; editing a task rewrites only its own folder (notes: only `notes.md`).
 Pre-0.7 data (everything inline in `tasks.json`) is split into folders on first launch, after copying
@@ -175,6 +178,32 @@ Task notes and notes render the same Markdown, plus:
 
 Click a diagram, or an image on its own line, to open it full-window; click or Esc closes.
 
+## Custom blocks
+
+A custom block runs a script and shows the Markdown it prints, e.g. your open Jira tickets. Make one
+on the **Blocks** page (⌘4): + → Blank or Jira tickets, fill in the form, Save. Use it in a note by
+typing `/` and picking it under Custom, or by writing a fence:
+
+````markdown
+```block jira
+jql: project = PP AND resolution = Unresolved
+limit: 5
+```
+````
+
+| Part | Behaviour |
+|---|---|
+| Config | `key: value` lines in the fence; params not given use their defaults. Editing the block shows the params it takes |
+| Script | Runs in `blocks/<name>/` through your login shell (Homebrew tools work). Gets params as JSON on stdin and as `BLOCK_<NAME>` env vars; stdout = the Markdown; non-zero exit = failed (stderr shown, last output kept) |
+| Environment | Per block type; a value `keychain:<service>` is read from the login keychain at run time (`security add-generic-password -s <service> -a $USER -w`) |
+| Refresh | Output is cached; a block older than its **Fresh for** seconds re-runs when shown (0 = never); hover → ↻ re-runs now. **Timeout** kills the script and anything it started |
+| Trust | Off per workspace until you click **Allow…** on a block (or Settings → Workspaces → Run block scripts). Test runs on the Blocks page always run |
+| Saving | Explicit (Save). Every save re-runs that type's blocks; editing the script outside the app doesn't, so use ↻ |
+
+Jira template: Server/Data Center by default (bearer personal access token on `/rest/api/2/search`);
+for Jira Cloud set `JIRA_URL` to `https://<site>.atlassian.net` and add `JIRA_EMAIL` (API token as
+`JIRA_TOKEN`). Store the token with `security add-generic-password -s buffer-jira -a $USER -w`.
+
 ## Look
 
 Palette lives in `themes/buffer.json`; `chart.1`–`chart.5` drive the brand gradient, glows and
@@ -205,6 +234,7 @@ pulsing indicators (saves battery). macOS "Reduce motion" is honoured by every a
 | `src/focus/` | `FocusTimer` entity (pomodoro state, `focus.json`) |
 | `src/notes/` | `NoteStore` entity (`notes.json` + `notes/<id>.md`) |
 | `src/editor/` | Block editor for notes and task notes; `mod.rs` lists its files |
+| `src/blocks/` | Custom blocks: model + fence config, store, script runner, cache/trust, templates; `mod.rs` lists its files |
 | `src/net.rs` | HTTP client GPUI uses for remote images |
 | `src/quotes.rs` | Daily sidebar line + time-of-day greeting |
 | `themes/buffer.json` | Light + dark palettes (hot-reloaded in debug builds) |
