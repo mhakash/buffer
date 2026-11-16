@@ -255,6 +255,29 @@ impl SettingsPage {
                     .clone()
                     .map(|err| div().text_xs().text_color(theme.danger).child(err)),
             )
+            .child(
+                h_flex()
+                    .justify_between()
+                    .gap_4()
+                    .pt_2()
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .child(div().text_sm().child("Run block scripts"))
+                            .child(div().text_xs().text_color(theme.muted_foreground).child(
+                            "Custom blocks in this workspace run the scripts in its blocks folder. \
+                                 Only allow it for folders you trust.",
+                        )),
+                    )
+                    .child(
+                        div().flex_none().child(Switch::new("blocks-trusted")
+                            .checked(workspaces::blocks_trusted(cx))
+                            .on_click(|checked: &bool, _, cx| {
+                                workspaces::set_blocks_trusted(*checked, cx)
+                            })),
+                    ),
+            )
     }
 
     fn render_categories(&self, cx: &mut Context<Self>) -> gpui_kit::Div {

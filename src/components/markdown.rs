@@ -12,7 +12,9 @@ use std::{
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Theme;
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Icon, Sizable, h_flex,
+    ActiveTheme, Disableable, Icon, Sizable,
+    button::{Button, ButtonRounded},
+    h_flex,
     text::{
         MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, TextView,
         TextViewStyle, markdown_ast,
@@ -594,7 +596,9 @@ impl MarkdownPlugin for BlockPlugin {
         let group: SharedString = format!("block-{key}").into();
         let now = chrono::Utc::now();
 
+        let trusted = crate::workspaces::blocks_trusted(cx);
         let note = match (&status.output, status.running) {
+            _ if !trusted => "Scripts off".to_string(),
             (_, true) => "Running…".to_string(),
             (Some(out), _) if out.ok => format!("Updated {}", blocks::model::ago(out.ran_at, now)),
             (Some(out), _) => format!("Failed {}", blocks::model::ago(out.ran_at, now)),
@@ -644,12 +648,36 @@ impl MarkdownPlugin for BlockPlugin {
                     .text_color(theme.muted_foreground)
                     .child(note),
             )
-            .child(
-                div()
-                    .opacity(0.)
-                    .group_hover(group.clone(), |s| s.opacity(1.))
-                    .child(refresh),
-            );
+            .when(trusted, |h| {
+                h.child(
+                    div()
+                        .opacity(0.)
+                        .group_hover(group.clone(), |s| s.opacity(1.))
+                        .child(refresh),
+                )
+            });
+        let allow = (!trusted).then(|| {
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(
+                    div()
+                        .flex_1()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child("Block scripts are off in this workspace."),
+                )
+                .child(
+                    Button::new(("block-allow", id))
+                        .small()
+                        .rounded(ButtonRounded::Size(px(999.)))
+                        .label("Allow…")
+                        .on_click(|_, window, cx| {
+                            cx.stop_propagation();
+                            allow_blocks(window, cx);
+                        }),
+                )
+        });
 
         let body = status.output.as_ref().and_then(|out| {
             (!out.markdown.trim().is_empty()).then(|| {
@@ -710,10 +738,28 @@ impl MarkdownPlugin for BlockPlugin {
 
         card.group(group)
             .child(header)
+            .children(allow)
             .children(body)
             .children(error)
             .into_any_element()
     }
+}
+
+/// Asks before letting this workspace's custom blocks run their scripts.
+fn allow_blocks(window: &mut Window, cx: &mut App) {
+    let name = crate::workspaces::get(cx).active().name.clone();
+    super::confirm::confirm(
+        window,
+        cx,
+        "Allow block scripts?",
+        format!(
+            "Custom blocks in “{name}” run the scripts in its blocks folder on this Mac, with \
+             your access to files and the network. Allow only if you trust what's in that folder. \
+             You can turn this off in Settings."
+        ),
+        "Allow",
+        |_, cx| crate::workspaces::set_blocks_trusted(true, cx),
+    );
 }
 
 const FRONTMATTER: &str = "frontmatter";

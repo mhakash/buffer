@@ -8,6 +8,9 @@
 //! | `store` | files on disk |
 //! | `runner` | running a script (blocking, tested) |
 //!
+//! Scripts run only in workspaces that allowed them (`workspaces::blocks_trusted`); until then
+//! cards show cached output and an Allow button.
+//!
 //! State is the [`Blocks`] global, reloaded per workspace by [`load`]. Runs happen on a thread;
 //! a finished run updates the global and repaints every window, so renderers just read [`status`].
 
@@ -26,7 +29,7 @@ use chrono::Utc;
 use futures::channel::oneshot;
 use gpui_kit::{App, Global, SharedString, assets::IconName};
 
-use crate::storage;
+use crate::{storage, workspaces};
 use model::{BlockType, Config, Output};
 use runner::Job;
 
@@ -66,7 +69,8 @@ pub fn reload_types(cx: &mut App) {
     cx.refresh_windows();
 }
 
-/// Runs a block once for the Blocks page's test run: no cache, no dedup.
+/// Runs a block once for the Blocks page's test run: no cache, no dedup, and no trust check
+/// (the user is running the script they are editing).
 pub fn run_once(ty: &BlockType, config: &Config) -> oneshot::Receiver<Output> {
     let job = job(ty, config);
     let (tx, rx) = oneshot::channel();
@@ -123,8 +127,12 @@ pub fn status(ty: &BlockType, config: &Config, cx: &mut App) -> Status {
     }
 }
 
-/// Runs the block unless a fresh result exists or it is already running.
+/// Runs the block unless a fresh result exists, it is already running, or the workspace hasn't
+/// allowed block scripts.
 pub fn ensure(ty: &BlockType, config: &Config, cx: &mut App) {
+    if !workspaces::blocks_trusted(cx) {
+        return;
+    }
     let fresh = status(ty, config, cx)
         .output
         .is_some_and(|o| o.is_fresh(ty.ttl, Utc::now()));
@@ -133,9 +141,11 @@ pub fn ensure(ty: &BlockType, config: &Config, cx: &mut App) {
     }
 }
 
-/// Runs the block now (unless it is already running).
+/// Runs the block now (unless it is already running or block scripts aren't allowed).
 pub fn refresh(ty: &BlockType, config: &Config, cx: &mut App) {
-    start(ty, config, cx);
+    if workspaces::blocks_trusted(cx) {
+        start(ty, config, cx);
+    }
 }
 
 fn start(ty: &BlockType, config: &Config, cx: &mut App) {

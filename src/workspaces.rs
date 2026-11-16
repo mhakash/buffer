@@ -26,6 +26,10 @@ pub struct Entry {
     /// Absolute root folder; `None` = the app dir (the default workspace).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<PathBuf>,
+    /// Custom blocks may run their scripts. Off until the user allows it: a folder opened as a
+    /// workspace could come with someone else's `blocks/`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub blocks_trusted: bool,
 }
 
 impl Entry {
@@ -60,6 +64,7 @@ impl Registry {
                     id,
                     name: DEFAULT_NAME.into(),
                     path: None,
+                    blocks_trusted: false,
                 },
             );
         }
@@ -104,6 +109,7 @@ impl Registry {
             id,
             name,
             path: Some(path),
+            blocks_trusted: false,
         });
         id
     }
@@ -118,6 +124,21 @@ pub fn init(cx: &mut App) {
 
 pub fn get(cx: &App) -> &Registry {
     cx.global::<Registry>()
+}
+
+/// The active workspace lets custom blocks run their scripts.
+pub fn blocks_trusted(cx: &App) -> bool {
+    cx.try_global::<Registry>()
+        .is_some_and(|r| r.active().blocks_trusted)
+}
+
+pub fn set_blocks_trusted(trusted: bool, cx: &mut App) {
+    update(cx, move |r| {
+        let id = r.active().id;
+        if let Some(w) = r.workspaces.iter_mut().find(|w| w.id == id) {
+            w.blocks_trusted = trusted;
+        }
+    });
 }
 
 /// Makes `id` active; the root view reloads every store and page.
@@ -246,6 +267,24 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blocks_are_untrusted_unless_saved_so() {
+        let r: Registry =
+            serde_json::from_str(r#"{"active": 0, "workspaces": [{"id": 0, "name": "P"}]}"#)
+                .unwrap();
+        assert!(!r.active().blocks_trusted);
+        assert!(
+            !serde_json::to_string(&r)
+                .unwrap()
+                .contains("blocks_trusted")
+        );
+        let mut r = r;
+        r.workspaces[0].blocks_trusted = true;
+        let json = serde_json::to_string(&r).unwrap();
+        let back: Registry = serde_json::from_str(&json).unwrap();
+        assert!(back.active().blocks_trusted);
+    }
 
     #[test]
     fn missing_registry_is_just_the_default_workspace() {
