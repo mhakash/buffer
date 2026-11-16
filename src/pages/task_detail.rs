@@ -21,12 +21,12 @@ use gpui_kit::{
     SharedString, Subscription, Window, assets::IconName, div, ease_out_quint, prelude::*, px, rgb,
 };
 
-use super::tasks::due_label;
+use super::{
+    block_editor::{BlockEditor, BlockEditorEvent},
+    tasks::due_label,
+};
 use crate::{
-    components::{
-        category_tag, confirm::confirm_delete, fx, icon_button, markdown_style, markdown_view,
-        property_row,
-    },
+    components::{category_tag, confirm::confirm_delete, fx, icon_button, property_row},
     tasks::{Id, LinkKind, Task, TaskStore, classify, is_url},
 };
 
@@ -64,8 +64,9 @@ pub struct TaskDetail {
     task: Option<Id>,
     /// Full page instead of the side panel.
     full_page: bool,
-    /// Notes show rendered Markdown unless this is set.
-    editing_notes: bool,
+    /// Notes show their Markdown source instead of the block editor.
+    source_notes: bool,
+    blocks: Entity<BlockEditor>,
     title: Entity<InputState>,
     notes: Entity<TextareaState>,
     due: Entity<DatePickerState>,
@@ -82,6 +83,11 @@ impl TaskDetail {
             TextareaState::new(window, cx)
                 .auto_grow(8, 400)
                 .placeholder("Markdown: # headings, **bold**, - [ ] checklists, `code`, links…")
+        });
+        let blocks = cx.new(|cx| {
+            let mut editor = BlockEditor::new(window, cx);
+            editor.set_compact(true, cx);
+            editor
         });
         let due = cx.new(|cx| DatePickerState::new(window, cx).date_format("%a, %b %-d"));
         let subtask_input = cx.new(|cx| InputState::new(window, cx).placeholder("Add a subtask"));
@@ -100,13 +106,23 @@ impl TaskDetail {
                 }
             }),
             cx.subscribe_in(&notes, window, |this, input, event: &InputEvent, _, cx| {
-                if let (InputEvent::Change, Some(id), true) = (event, this.task, this.editing_notes)
+                if let (InputEvent::Change, Some(id), true) = (event, this.task, this.source_notes)
                 {
                     let value = input.read(cx).value();
                     this.store
                         .update(cx, |store, cx| store.set_notes(id, &value, cx));
                 }
             }),
+            cx.subscribe_in(
+                &blocks,
+                window,
+                |this, _, event: &BlockEditorEvent, _, cx| {
+                    if let (BlockEditorEvent::Changed(notes), Some(id)) = (event, this.task) {
+                        this.store
+                            .update(cx, |store, cx| store.set_notes(id, notes, cx));
+                    }
+                },
+            ),
             cx.subscribe_in(&due, window, |this, _, event: &DatePickerEvent, _, cx| {
                 let (DatePickerEvent::Change(value), Some(id)) = (event, this.task) else {
                     return;
@@ -132,7 +148,8 @@ impl TaskDetail {
             store,
             task: None,
             full_page: false,
-            editing_notes: false,
+            source_notes: false,
+            blocks,
             title,
             notes,
             due,
@@ -181,7 +198,9 @@ impl TaskDetail {
             return;
         };
         self.task = Some(id);
-        self.editing_notes = false;
+        self.source_notes = false;
+        self.blocks
+            .update(cx, |b, cx| b.load(&task.notes, TaskStore::task_dir(id), cx));
         self.title
             .update(cx, |i, cx| i.set_value(task.title, window, cx));
         self.due.update(cx, |d, cx| {
@@ -195,7 +214,7 @@ impl TaskDetail {
 
     pub fn close(&mut self, cx: &mut Context<Self>) {
         self.task = None;
-        self.editing_notes = false;
+        self.source_notes = false;
         cx.emit(DetailEvent::Close);
         cx.notify();
     }
@@ -203,21 +222,36 @@ impl TaskDetail {
     pub fn set_full_page(&mut self, full_page: bool, cx: &mut Context<Self>) {
         if self.full_page != full_page {
             self.full_page = full_page;
+            self.blocks
+                .update(cx, |b, cx| b.set_compact(!full_page, cx));
             cx.emit(DetailEvent::Layout);
             cx.notify();
         }
     }
 
-    /// Esc leaves the notes editor first, then the full page, then closes.
+    /// Esc leaves the notes source first, then the full page, then closes.
     fn escape(&mut self, cx: &mut Context<Self>) {
-        if self.editing_notes {
-            self.editing_notes = false;
-            cx.notify();
+        if self.source_notes {
+            self.show_blocks(cx);
         } else if self.full_page {
             self.set_full_page(false, cx);
         } else {
             self.close(cx);
         }
+    }
+
+    /// Back from the source to the block editor.
+    fn show_blocks(&mut self, cx: &mut Context<Self>) {
+        self.source_notes = false;
+        if let Some(task) = self
+            .task
+            .and_then(|id| self.store.read(cx).task(id).cloned())
+        {
+            self.blocks.update(cx, |b, cx| {
+                b.load(&task.notes, TaskStore::task_dir(task.id), cx)
+            });
+        }
+        cx.notify();
     }
 
     fn edit_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -227,8 +261,8 @@ impl TaskDetail {
         else {
             return;
         };
-        // The store is the source of truth while previewing (checkbox clicks edit it there).
-        self.editing_notes = true;
+        // The store is the source of truth while the block editor shows.
+        self.source_notes = true;
         self.notes.update(cx, |n, cx| {
             n.set_value(task.notes, window, cx);
             n.focus(window, cx);
@@ -475,32 +509,35 @@ impl TaskDetail {
             )
     }
 
-    fn render_notes(&self, task: &Task, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let id = task.id;
-        let editing = self.editing_notes;
+    fn render_notes(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let source = self.source_notes;
         let toggle = Button::new("notes-mode")
             .ghost()
             .xsmall()
             .rounded(ButtonRounded::Size(px(999.)))
             .icon(
-                Icon::new(if editing {
-                    IconName::Eye
+                Icon::new(if source {
+                    IconName::Type
                 } else {
-                    IconName::SquarePen
+                    IconName::SquareCode
                 })
                 .text_color(theme.muted_foreground),
             )
-            .label(if editing { "Preview" } else { "Edit" })
+            .label(if source { "Rich text" } else { "Markdown" })
+            .tooltip(if source {
+                "Back to the block editor"
+            } else {
+                "Edit the Markdown source"
+            })
             .on_click(cx.listener(move |this, _, window, cx| {
-                if this.editing_notes {
-                    this.editing_notes = false;
-                    cx.notify();
+                if this.source_notes {
+                    this.show_blocks(cx);
                 } else {
                     this.edit_notes(window, cx);
                 }
             }));
 
-        let body = if editing {
+        let body = if source {
             div()
                 .px_3()
                 .py_2()
@@ -512,43 +549,9 @@ impl TaskDetail {
                 .font_family(theme.mono_font_family.clone())
                 .child(Textarea::new(&self.notes).appearance(false))
                 .into_any_element()
-        } else if task.notes.trim().is_empty() {
-            // Block, not a flex row: plain text in a flex row doesn't wrap and overflows.
-            div()
-                .id("notes-empty")
-                .w_full()
-                .px_3()
-                .py_3()
-                .rounded_xl()
-                .cursor_text()
-                .border_1()
-                .border_dashed()
-                .border_color(theme.border)
-                .text_sm()
-                .text_color(theme.muted_foreground)
-                .hover(|s| s.bg(theme.secondary))
-                .child("Write notes in Markdown — context, decisions, checklists, snippets…")
-                .on_click(cx.listener(|this, _, window, cx| this.edit_notes(window, cx)))
-                .into_any_element()
         } else {
-            let store = self.store.clone();
-            div()
-                .id("notes-preview")
-                .text_sm()
-                .child(
-                    markdown_view(
-                        ("notes-md", id),
-                        task.notes.clone(),
-                        markdown_style(),
-                        TaskStore::task_dir(id),
-                    )
-                    .on_task_toggle(move |event, _, cx| {
-                        store.update(cx, |s, cx| {
-                            s.set_note_checkbox(id, event.marker_range(), event.checked(), cx)
-                        });
-                    }),
-                )
-                .into_any_element()
+            // Same editor as the Notes page.
+            self.blocks.clone().into_any_element()
         };
 
         Self::section(IconName::NotebookPen, "Notes", None, theme)
@@ -865,7 +868,7 @@ impl Render for TaskDetail {
                     .pt_5()
                     .pb_10()
                     .gap_7()
-                    .child(self.render_notes(&task, &theme, cx))
+                    .child(self.render_notes(&theme, cx))
                     .child(self.render_subtasks(&task, &theme, cx))
                     .child(self.render_links(&task, &theme, cx))
                     .child(self.render_log(&task, &theme, cx)),

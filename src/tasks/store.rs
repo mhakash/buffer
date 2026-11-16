@@ -204,23 +204,6 @@ impl TaskStore {
         }
     }
 
-    /// Ticks or unticks a Markdown `[ ]` / `[x]` marker at `marker` (byte range) in the notes.
-    pub fn set_note_checkbox(
-        &mut self,
-        id: Id,
-        marker: std::ops::Range<usize>,
-        checked: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(task) = self.task_mut(id)
-            && let Some(notes) = super::model::set_checkbox(&task.notes, marker, checked)
-        {
-            task.notes = notes;
-            task.updated_at = Some(Utc::now());
-            self.commit_notes(id, cx);
-        }
-    }
-
     pub fn add_subtask(&mut self, id: Id, title: &str, cx: &mut Context<Self>) {
         let title = title.trim();
         if title.is_empty() {

@@ -7,7 +7,7 @@
 //! list items, `/` opens the block menu, Markdown prefixes (`# `, `- `, `[] `, `> `, ```` ``` ````,
 //! `---`) convert the block. ⌘B/⌘I/⌘E/⌘⇧X/⌘K wrap the selection in Markdown marks.
 
-use std::{cell::Cell, rc::Rc};
+use std::{cell::Cell, path::PathBuf, rc::Rc};
 
 use gpui_kit::component::{
     ActiveTheme, Icon, Sizable, Size, Theme,
@@ -29,15 +29,11 @@ use gpui_kit::{
 
 use crate::{
     actions::{Bold, InlineCode, Italic, Link, Strikethrough},
-    components::{confirm::confirm_delete, document_style, markdown_view},
-    notes::{
-        NoteStore,
-        blocks::{self, Doc, Kind, inline_markdown},
-    },
+    components::{confirm::confirm_delete, document_style, markdown_style, markdown_view},
+    notes::blocks::{self, Doc, Kind, inline_markdown},
 };
 
 /// Room left of the text for the hover handles (inside the document padding).
-const GUTTER: f32 = 48.;
 const INDENT: f32 = 24.;
 const MARKER_W: f32 = 24.;
 
@@ -137,7 +133,16 @@ fn slash_query(text: &str) -> Option<String> {
 
 /// Text size, weight and line height (px) per kind; the textarea and the rendered block use
 /// the same values so swapping between them doesn't move the text.
-fn metrics(kind: &Kind) -> (f32, FontWeight, f32) {
+fn metrics(kind: &Kind, compact: bool) -> (f32, FontWeight, f32) {
+    if compact {
+        return match kind {
+            Kind::Heading(1) => (18., FontWeight::BOLD, 26.),
+            Kind::Heading(2) => (16., FontWeight::BOLD, 24.),
+            Kind::Heading(_) => (15., FontWeight::SEMIBOLD, 22.),
+            Kind::Code(_) | Kind::Raw => (13., FontWeight::NORMAL, 19.),
+            _ => (14., FontWeight::NORMAL, 22.),
+        };
+    }
     match kind {
         Kind::Heading(1) => (26., FontWeight::BOLD, 34.),
         Kind::Heading(2) => (21., FontWeight::BOLD, 29.),
@@ -148,14 +153,19 @@ fn metrics(kind: &Kind) -> (f32, FontWeight, f32) {
 }
 
 /// Space above a block, so headings start sections.
-fn space_above(kind: &Kind, first: bool) -> f32 {
-    match kind {
+fn space_above(kind: &Kind, first: bool, compact: bool) -> f32 {
+    let space = match kind {
         _ if first => 0.,
         Kind::Heading(1) => 20.,
         Kind::Heading(2) => 14.,
         Kind::Heading(_) => 10.,
         Kind::Code(_) | Kind::Raw | Kind::Divider => 6.,
         _ => 1.,
+    };
+    if compact {
+        (space * 0.6_f32).round()
+    } else {
+        space
     }
 }
 
@@ -168,6 +178,10 @@ pub struct BlockEditor {
     menu_scroll: ScrollHandle,
     /// Where the active textarea was laid out, for replaying the click that opened it.
     active_bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// Folder relative image paths resolve against (the note's or task's).
+    dir: PathBuf,
+    /// Smaller type and a grip-only gutter, for the task side panel.
+    compact: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -184,16 +198,31 @@ impl BlockEditor {
             menu: None,
             active_bounds: Rc::default(),
             menu_scroll: ScrollHandle::new(),
+            dir: PathBuf::new(),
+            compact: false,
             _subscriptions: subscriptions,
         }
     }
 
-    /// Show `markdown` (a different note, or the source was edited elsewhere).
-    pub fn load(&mut self, markdown: &str, cx: &mut Context<Self>) {
+    /// Show `markdown` (a different note, or the source was edited elsewhere); relative images
+    /// resolve against `dir`.
+    pub fn load(&mut self, markdown: &str, dir: PathBuf, cx: &mut Context<Self>) {
         self.doc = blocks::parse(markdown);
+        self.dir = dir;
         self.active = None;
         self.menu = None;
         cx.notify();
+    }
+
+    pub fn set_compact(&mut self, compact: bool, cx: &mut Context<Self>) {
+        if self.compact != compact {
+            self.compact = compact;
+            cx.notify();
+        }
+    }
+
+    fn gutter(&self) -> f32 {
+        if self.compact { 24. } else { 48. }
     }
 
     /// Start writing at the top (Enter in the title).
@@ -826,7 +855,7 @@ impl BlockEditor {
                                     window,
                                     cx,
                                     "Delete block?",
-                                    "This block will be removed from the note.",
+                                    "This block will be removed.",
                                     move |_, cx| {
                                         this.update(cx, |e, cx| e.delete(id, cx)).ok();
                                     },
@@ -839,11 +868,11 @@ impl BlockEditor {
             .absolute()
             .left(px(left))
             .top(px(top))
-            .w(px(GUTTER - 4.))
+            .w(px(self.gutter() - 4.))
             .justify_end()
             .opacity(0.)
             .group_hover(format!("blk-{id}"), |s| s.opacity(1.))
-            .child(add)
+            .when(!self.compact, |this| this.child(add))
             .child(grip)
             .into_any_element()
     }
@@ -957,9 +986,18 @@ impl BlockEditor {
         let id = block.id;
         let kind = &block.kind;
         let active = self.active == Some(ix);
-        let (size, weight, line_h) = metrics(kind);
-        let above = space_above(kind, ix == 0);
-        let dir = NoteStore::dir();
+        let compact = self.compact;
+        let (size, weight, line_h) = metrics(kind, compact);
+        let above = space_above(kind, ix == 0, compact);
+        let dir = self.dir.clone();
+        let gutter = self.gutter();
+        let style = || {
+            if compact {
+                markdown_style()
+            } else {
+                document_style()
+            }
+        };
         let indent_x = block.indent as f32 * INDENT;
 
         let row = h_flex()
@@ -969,8 +1007,8 @@ impl BlockEditor {
             .items_start()
             .pt(px(above))
             // The row reaches into the gutter so hovering the handles keeps them shown.
-            .ml(px(-GUTTER))
-            .pl(px(GUTTER + block.indent as f32 * INDENT));
+            .ml(px(-gutter))
+            .pl(px(gutter + block.indent as f32 * INDENT));
 
         if *kind == Kind::Divider {
             return row
@@ -1019,10 +1057,9 @@ impl BlockEditor {
                 .flex_1()
                 .min_w_0()
                 .cursor_text()
-                .text_size(px(16.))
+                .text_size(px(if compact { 14. } else { 16. }))
                 .child(
-                    markdown_view(("blk-md", id), block.source(), document_style(), dir)
-                        .selectable(false),
+                    markdown_view(("blk-md", id), block.source(), style(), dir).selectable(false),
                 )
                 .into_any_element()
         } else if block.text.trim().is_empty() {
@@ -1046,7 +1083,7 @@ impl BlockEditor {
                     markdown_view(
                         ("blk-md", id),
                         inline_markdown(&block.text),
-                        document_style().paragraph_gap(gpui_kit::rems(0.)),
+                        style().paragraph_gap(gpui_kit::rems(0.)),
                         dir,
                     )
                     .selectable(false),
@@ -1107,14 +1144,18 @@ impl gpui_kit::Render for BlockEditor {
             .on_action(cx.listener(|this, _: &InlineCode, w, cx| this.toggle_mark("`", w, cx)))
             .on_action(cx.listener(|this, _: &Strikethrough, w, cx| this.toggle_mark("~~", w, cx)))
             .on_action(cx.listener(|this, _: &Link, w, cx| this.link(w, cx)))
-            .text_base()
             .children(rows)
             .child(
                 div()
                     .id("blk-tail")
                     .w_full()
-                    .min_h(px(160.))
+                    .min_h(px(if self.compact { 40. } else { 160. }))
                     .cursor_text()
+                    .when(self.doc.blocks.is_empty(), |d| {
+                        d.text_size(px(if self.compact { 14. } else { 16. }))
+                            .text_color(theme.muted_foreground)
+                            .child("Write something, or type ‘/’ for commands…")
+                    })
                     .on_click(cx.listener(|this, _, window, cx| this.click_tail(window, cx))),
             )
     }

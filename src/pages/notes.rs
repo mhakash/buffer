@@ -224,7 +224,8 @@ impl NotesPage {
             .unwrap_or_default();
         self.title
             .update(cx, |t, cx| t.set_value(title, window, cx));
-        self.blocks.update(cx, |b, cx| b.load(&content, cx));
+        self.blocks
+            .update(cx, |b, cx| b.load(&content, NoteStore::dir(), cx));
         cx.notify();
     }
 
@@ -267,7 +268,8 @@ impl NotesPage {
             .and_then(|id| self.store.read(cx).note(id))
             .map(|n| n.split().content.to_string())
             .unwrap_or_default();
-        self.blocks.update(cx, |b, cx| b.load(&content, cx));
+        self.blocks
+            .update(cx, |b, cx| b.load(&content, NoteStore::dir(), cx));
         self.focus_handle.focus(window, cx);
         cx.notify();
     }

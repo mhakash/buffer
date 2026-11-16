@@ -339,20 +339,6 @@ fn unescape_quick_add_word(word: &str) -> String {
     out
 }
 
-/// `notes` with the task-list marker at `marker` (`[ ]`/`[x]`, brackets included) set to
-/// `checked`; `None` if the range doesn't point at a marker (notes changed underneath).
-pub fn set_checkbox(notes: &str, marker: std::ops::Range<usize>, checked: bool) -> Option<String> {
-    let current = notes.get(marker.clone())?;
-    if !matches!(current, "[ ]" | "[x]" | "[X]") {
-        return None;
-    }
-    let mut out = String::with_capacity(notes.len());
-    out.push_str(&notes[..marker.start]);
-    out.push_str(if checked { "[x]" } else { "[ ]" });
-    out.push_str(&notes[marker.end..]);
-    Some(out)
-}
-
 /// Comparison key so `#follow-up`, `#followup` and "Follow up" all hit the same category.
 pub fn category_key(name: &str) -> String {
     name.chars()
@@ -427,21 +413,6 @@ mod tests {
         assert_eq!(parsed.title, "Post in #random !urgent");
         assert_eq!(parsed.categories, vec!["work"]);
         assert_eq!(parsed.priority, None);
-    }
-
-    #[test]
-    fn toggles_markdown_checkboxes_in_place() {
-        let notes = "- [ ] one\n- [x] two";
-        assert_eq!(
-            set_checkbox(notes, 2..5, true).unwrap(),
-            "- [x] one\n- [x] two"
-        );
-        assert_eq!(
-            set_checkbox(notes, 12..15, false).unwrap(),
-            "- [ ] one\n- [ ] two"
-        );
-        assert!(set_checkbox(notes, 0..3, true).is_none());
-        assert!(set_checkbox(notes, 40..43, true).is_none());
     }
 
     #[test]

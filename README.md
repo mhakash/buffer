@@ -82,14 +82,14 @@ and the last 7 days.
 
 Click a task's title to open it in a side panel. Drag the panel's left edge to resize it (width is
 remembered). Wide windows dock it beside the list; narrower ones float it over the page. The ⤢ button
-opens the task as a full page (Notion-style); ← Tasks or × closes it. Esc steps back: notes editor →
+opens the task as a full page (Notion-style); ← Tasks or × closes it. Esc steps back: notes block or source →
 side panel → closed. The folder button reveals the task's files in Finder.
 
 | Section | What it holds |
 |---|---|
 | Title | Done checkbox + inline-editable title; "Edited …" time in the toolbar |
 | Properties | Status, priority (click to cycle), categories (+ menu toggles any number), due date (overdue shows red), created |
-| Notes | Markdown, rendered: headings, lists, tables, code blocks, links. Edit/Preview toggle; ticking a `- [ ]` box in the preview updates the source |
+| Notes | Same block editor as the Notes page (see Block editor), compact in the side panel; Markdown / Rich text toggles the source |
 | Subtasks | Checklist with progress bar; Enter adds |
 | Links | Paste URLs, Enter adds. Jira → `PAY-88`, GitLab MR → `!412`, issues → `#7`, GitHub PRs, Confluence pages; click opens in browser |
 | Work log | Timestamped entries (newest first) for what you did |
@@ -122,7 +122,8 @@ edit it; URL values get an open button; hover a row to remove it.
 
 ### Block editor
 
-Every paragraph, heading, list item, to-do, quote, code fence and divider is a block. Blocks show
+Notes and task notes share one editor. Every paragraph, heading, list item, to-do, quote, code
+fence and divider is a block. Blocks show
 formatted; click one to edit it (its inline Markdown — `**bold**`, links — shows while editing).
 Untouched blocks are saved byte for byte, so the file stays yours.
 
