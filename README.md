@@ -218,7 +218,7 @@ it's never written into a workspace folder. Shape:
 
 Palette lives in `themes/buffer.json`; `chart.1`–`chart.5` drive the brand gradient, glows and
 the ambient backdrop. Settings → Appearance → Ambient motion turns off the drifting glow and
-pulsing indicators (saves battery). macOS "Reduce motion" is honoured by every animation.
+pulsing indicators (saves battery); they also pause while the window is in the background. macOS "Reduce motion" is honoured by every animation.
 
 ## Shortcuts
 

@@ -18,7 +18,7 @@ mod workspaces;
 use gpui_kit::component::TitleBar;
 use gpui_kit::{App, AppContext, Bounds, WindowBounds, WindowOptions, px, size};
 
-use crate::workspace::Workspace;
+use crate::workspace::Shell;
 
 pub const APP_NAME: &str = "Buffer";
 
@@ -74,7 +74,7 @@ fn open_main_window(cx: &mut App) {
             ..TitleBar::window_options()
         },
         cx,
-        |window, cx| cx.new(|cx| Workspace::new(window, cx)),
+        |window, cx| cx.new(|cx| Shell::new(window, cx)),
     );
     if let Err(err) = result {
         eprintln!("failed to open main window: {err:?}");

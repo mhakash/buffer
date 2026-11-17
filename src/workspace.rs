@@ -11,8 +11,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     AnimationExt, AnyView, Context, DragMoveEvent, Entity, FocusHandle, FontWeight, SharedString,
-    SpringAnimation, SpringConfig, Subscription, Task, Window, assets::IconName, div, prelude::*,
-    px,
+    SpringAnimation, SpringConfig, StyleRefinement, Subscription, Task, Window, assets::IconName,
+    div, prelude::*, px,
 };
 
 use crate::{
@@ -22,6 +22,7 @@ use crate::{
         ShowSettings, ShowTasks, ToggleTimer,
     },
     components::{
+        aurora::Aurora,
         fx::{self, SPRING},
         icon_button, lightbox,
     },
@@ -143,8 +144,13 @@ impl Workspace {
                 }
             }
         });
+        cx.set_global(fx::WindowActive(window.is_window_active()));
         let activation = cx.observe_window_activation(window, |_, window, cx| {
-            if window.is_window_active() {
+            let active = window.is_window_active();
+            cx.set_global(fx::WindowActive(active));
+            // Starts or stops ambient motion everywhere, cached views included.
+            window.refresh();
+            if active {
                 crate::blocks::reload_if_changed(cx);
             }
         });
@@ -509,7 +515,7 @@ impl Workspace {
     }
 
     fn render_sidebar(&self, theme: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
-        let ambient = prefs::get(cx).ambient;
+        let ambient = fx::ambient(cx);
         let dark = Appearance::current(cx) == Appearance::Dark;
 
         v_flex()
@@ -569,12 +575,59 @@ impl Workspace {
     }
 }
 
+/// Window root: the drifting backdrop and the workspace as sibling views. `Workspace` is cached,
+/// so a backdrop frame re-renders only `Aurora` and replays the workspace's last paint.
+pub struct Shell {
+    aurora: Entity<Aurora>,
+    workspace: Entity<Workspace>,
+}
+
+impl Shell {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self {
+            aurora: cx.new(|_| Aurora::default()),
+            workspace: cx.new(|cx| Workspace::new(window, cx)),
+        }
+    }
+}
+
+impl Render for Shell {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        // Kit dialog state isn't a view `Workspace` observes, so the dim layer lives here (the
+        // kit `Root` re-renders this view when a dialog opens or closes).
+        let dialog_open = window.has_active_dialog(cx);
+        let layer = || StyleRefinement::default().absolute().inset_0().size_full();
+        div()
+            .relative()
+            .size_full()
+            .bg(theme.background)
+            .child(self.aurora.clone().cached(layer()))
+            .child(self.workspace.clone().cached(layer()))
+            // Our own dim layer under kit dialogs: the kit's backdrop can't fade (it paints in a
+            // deferred pass), so theme `overlay` is transparent and this fades instead.
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .bg(if theme.is_dark() {
+                        theme.background.opacity(0.72)
+                    } else {
+                        theme.foreground.opacity(0.28)
+                    })
+                    .with_spring(
+                        "dialog-scrim",
+                        SpringAnimation::new(SCRIM_SPRING).to(if dialog_open { 1. } else { 0. }),
+                        |el, v| el.opacity(v.clamp(0., 1.)),
+                    ),
+            )
+    }
+}
+
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let ambient = prefs::get(cx).ambient;
         let page_id = self.active as u64;
-        let dialog_open = window.has_active_dialog(cx);
         // Hide the panel on pages without tasks, and drop it if its task was deleted.
         let open = self.detail.read(cx).task_id();
         if open.is_some_and(|id| self.store.read(cx).task(id).is_none()) {
@@ -656,10 +709,8 @@ impl Render for Workspace {
             .relative()
             .size_full()
             .overflow_hidden()
-            .bg(theme.background)
             .text_color(theme.foreground)
             .font_family(theme.font_family.clone())
-            .child(fx::aurora(ambient, cx))
             .child(
                 v_flex()
                     .absolute()
@@ -733,23 +784,6 @@ impl Render for Workspace {
                                         .child(self.detail.clone()),
                                 )
                             }),
-                    ),
-            )
-            // Our own dim layer under kit dialogs: the kit's backdrop can't fade (it paints in a
-            // deferred pass), so theme `overlay` is transparent and this fades instead.
-            .child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .bg(if theme.is_dark() {
-                        theme.background.opacity(0.72)
-                    } else {
-                        theme.foreground.opacity(0.28)
-                    })
-                    .with_spring(
-                        "dialog-scrim",
-                        SpringAnimation::new(SCRIM_SPRING).to(if dialog_open { 1. } else { 0. }),
-                        |el, v| el.opacity(v.clamp(0., 1.)),
                     ),
             )
             .children(lightbox::render(window, cx))

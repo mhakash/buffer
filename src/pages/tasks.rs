@@ -1115,7 +1115,7 @@ impl TasksPage {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = cx.theme().clone();
-        let ambient = prefs::get(cx).ambient;
+        let ambient = fx::ambient(cx);
         let id = task.id;
         let done = task.is_done();
         let completing = self.completing.contains(&id);

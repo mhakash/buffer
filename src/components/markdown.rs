@@ -771,7 +771,7 @@ impl MarkdownPlugin for BlockPlugin {
             || status.running
             || !has_output
             || status.output.as_ref().is_some_and(|o| !o.ok);
-        let ambient = crate::prefs::get(cx).ambient;
+        let ambient = super::fx::ambient(cx);
         let refresh = {
             let (ty, config) = (ty.clone(), fence.config.clone());
             super::icon_button(

@@ -1,6 +1,7 @@
 //! Thin wrappers over gpui-kit components that pin the app's look, plus visual effects.
 
 mod assets;
+pub mod aurora;
 mod card;
 mod chip;
 pub mod confirm;

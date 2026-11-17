@@ -10,7 +10,6 @@ use super::OpenTask;
 use crate::{
     components::{chip, fx, icon_button},
     focus::{FocusTimer, LENGTHS, Phase},
-    prefs,
     tasks::{Task, TaskStore},
 };
 
@@ -364,7 +363,7 @@ impl EventEmitter<OpenTask> for FocusPage {}
 impl Render for FocusPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let ambient = prefs::get(cx).ambient;
+        let ambient = fx::ambient(cx);
 
         v_flex()
             .gap_6()

@@ -45,8 +45,21 @@ pub fn glow(color: Hsla, blur: f32, spread: f32) -> Vec<BoxShadow> {
     }]
 }
 
-/// Full-window layer of slowly drifting colored light. Static when `animate` is false.
-pub fn aurora(animate: bool, cx: &App) -> AnyElement {
+/// Whether ambient (looping) motion should run: the user's setting, and only while the window is
+/// focused — every looping frame re-renders its view, so a window in the background stays still.
+pub fn ambient(cx: &App) -> bool {
+    crate::prefs::get(cx).ambient
+        && !cx.reduce_motion()
+        && cx.try_global::<WindowActive>().is_none_or(|a| a.0)
+}
+
+/// Whether the main window is focused; set by `Workspace` on activation changes.
+pub struct WindowActive(pub bool);
+impl gpui_kit::Global for WindowActive {}
+
+/// Full-window layer of slowly drifting colored light, drawn at `seconds` of drift
+/// (`components::aurora::Aurora` advances it).
+pub fn aurora(seconds: f32, cx: &App) -> AnyElement {
     let theme = cx.theme();
     let strength = if theme.is_dark() { 0.30 } else { 0.22 };
     // (color, anchor x/y as fraction of window, drift radius px, phase offset)
@@ -55,38 +68,30 @@ pub fn aurora(animate: bool, cx: &App) -> AnyElement {
         (theme.chart_2, 0.88, 0.30, 80., 0.33),
         (theme.chart_3, 0.55, 0.95, 70., 0.66),
     ];
-    let layer = div().absolute().inset_0().size_full().overflow_hidden();
-    let layer =
-        blobs
-            .into_iter()
-            .enumerate()
-            .fold(layer, |layer, (ix, (color, ax, ay, drift, phase))| {
-                let blob = div()
-                    .absolute()
-                    .left(gpui_kit::relative(ax))
-                    .top(gpui_kit::relative(ay))
-                    .size(px(8.))
-                    .rounded_full()
-                    .shadow(glow(color.opacity(strength), 260., 170.));
-                let blob = if animate {
-                    blob.with_animation(
-                        ("aurora", ix as u64),
-                        Animation::new(Duration::from_secs(28 + ix as u64 * 7))
-                            .repeat()
-                            .with_max_fps(20.),
-                        move |el, t| {
-                            let a = (t + phase) * TAU;
-                            el.ml(px(a.cos() * drift))
-                                .mt(px((a * 2.).sin() * drift * 0.6))
-                        },
-                    )
-                    .into_any_element()
-                } else {
-                    blob.into_any_element()
-                };
-                layer.child(blob)
-            });
-    layer.into_any_element()
+    div()
+        .absolute()
+        .inset_0()
+        .size_full()
+        .overflow_hidden()
+        .children(
+            blobs
+                .into_iter()
+                .enumerate()
+                .map(|(ix, (color, ax, ay, drift, phase))| {
+                    let period = (28 + ix * 7) as f32;
+                    let a = (seconds / period + phase) * TAU;
+                    div()
+                        .absolute()
+                        .left(gpui_kit::relative(ax))
+                        .top(gpui_kit::relative(ay))
+                        .ml(px(a.cos() * drift))
+                        .mt(px((a * 2.).sin() * drift * 0.6))
+                        .size(px(8.))
+                        .rounded_full()
+                        .shadow(glow(color.opacity(strength), 260., 170.))
+                }),
+        )
+        .into_any_element()
 }
 
 /// Easing for the `ix`-th item of a staggered list: waits, then eases out.
@@ -247,7 +252,7 @@ pub fn pulse<E: IntoElement + Styled + 'static>(
         id,
         Animation::new(Duration::from_millis(1600))
             .repeat()
-            .with_max_fps(30.)
+            .with_max_fps(10.)
             .with_easing(gpui_kit::pulsating_between(min, 1.)),
         |el, t| el.opacity(t),
     )
