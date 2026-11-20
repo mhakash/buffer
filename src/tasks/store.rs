@@ -2,14 +2,16 @@ use chrono::{NaiveDate, Utc};
 use gpui_kit::{Context, SharedString};
 
 use super::model::{
-    CATEGORY_COLORS, Category, DATA_VERSION, Id, Link, LogEntry, Priority, Subtask, Task, TaskData,
-    TaskDetails, category_key,
+    CATEGORY_COLORS, Category, DATA_VERSION, Id, Priority, Task, TaskData, TaskDetails,
+    category_key, link_markdown,
 };
 use crate::storage;
 
 const FILE: &str = "tasks.json";
 /// Copy of a v1 `tasks.json` taken before migrating it to per-task folders.
 const V1_BACKUP: &str = "tasks.v1-backup.json";
+/// Copy of a task's `task.json` taken before its subtasks, links and log moved into its notes.
+const DETAILS_BACKUP: &str = "task.v2-backup.json";
 
 /// Single source of truth for tasks; every mutation is saved to disk immediately.
 /// List fields go to `tasks.json`; each task's details go to its own `tasks/<id>/` folder,
@@ -36,6 +38,7 @@ impl TaskStore {
             },
         };
         let inline = data.version < 2;
+        let mut folded = Vec::new();
         for mut task in data.tasks {
             task.migrate_category();
             if !inline {
@@ -43,12 +46,37 @@ impl TaskStore {
                 let details: TaskDetails = storage::load(&format!("{dir}/task.json"));
                 task.set_details(details, storage::load_text(&format!("{dir}/notes.md")));
             }
+            if task.fold_legacy() {
+                folded.push(task.id);
+            }
             store.data.tasks.push(task);
         }
         if store.data.version != DATA_VERSION {
+            // Writes every task's folder, folded details included.
             store.migrate();
+        } else {
+            store.save_folded(&folded);
         }
         store
+    }
+
+    /// Pre-0.27 subtasks, links and work log were moved into these tasks' notes: write them,
+    /// keeping each old `task.json` beside it first.
+    fn save_folded(&mut self, ids: &[Id]) {
+        for &id in ids {
+            let dir = Task::dir(id);
+            let old = format!("{dir}/task.json");
+            let result = if storage::path(&old).exists() {
+                storage::copy(&old, &format!("{dir}/{DETAILS_BACKUP}"))
+            } else {
+                Ok(())
+            }
+            .and_then(|()| self.task(id).map_or(Ok(()), save_task_files));
+            if let Err(err) = result {
+                self.save_error =
+                    Some(format!("Couldn't move subtasks and links into notes: {err:#}").into());
+            }
+        }
     }
 
     /// v1 → v2: writes every task's folder, then the slimmed index. The original file is
@@ -108,13 +136,6 @@ impl TaskStore {
     ) -> Id {
         let id = self.next_id();
         let sort_order = self.next_sort_order(priority);
-        let links = links
-            .into_iter()
-            .map(|url| Link {
-                id: self.next_id(),
-                url,
-            })
-            .collect();
         self.data.tasks.push(Task {
             id,
             title,
@@ -126,9 +147,9 @@ impl TaskStore {
             completed_at: None,
             due: None,
             updated_at: None,
-            notes: String::new(),
+            notes: links_markdown(&links),
             subtasks: Vec::new(),
-            links,
+            links: Vec::new(),
             log: Vec::new(),
         });
         self.commit_task(id, cx);
@@ -204,87 +225,27 @@ impl TaskStore {
         }
     }
 
-    pub fn add_subtask(&mut self, id: Id, title: &str, cx: &mut Context<Self>) {
-        let title = title.trim();
-        if title.is_empty() {
+    /// Adds links (from quick add) to the end of the notes, skipping ones already there.
+    pub fn add_links(&mut self, id: Id, urls: &[String], cx: &mut Context<Self>) {
+        let Some(task) = self.task_mut(id) else {
+            return;
+        };
+        let existing = task.web_links();
+        let new: Vec<String> = urls
+            .iter()
+            .filter(|u| !existing.contains(u))
+            .cloned()
+            .collect();
+        if new.is_empty() {
             return;
         }
-        let sub_id = self.next_id();
-        if let Some(task) = self.task_mut(id) {
-            task.subtasks.push(Subtask {
-                id: sub_id,
-                title: title.to_string(),
-                completed_at: None,
-            });
-            self.commit_task(id, cx);
-        }
-    }
-
-    pub fn toggle_subtask(&mut self, id: Id, sub_id: Id, cx: &mut Context<Self>) {
-        if let Some(sub) = self
-            .task_mut(id)
-            .and_then(|t| t.subtasks.iter_mut().find(|s| s.id == sub_id))
-        {
-            sub.completed_at = match sub.completed_at {
-                Some(_) => None,
-                None => Some(Utc::now()),
-            };
-            self.commit_task(id, cx);
-        }
-    }
-
-    pub fn delete_subtask(&mut self, id: Id, sub_id: Id, cx: &mut Context<Self>) {
-        if let Some(task) = self.task_mut(id) {
-            task.subtasks.retain(|s| s.id != sub_id);
-            self.commit_task(id, cx);
-        }
-    }
-
-    pub fn add_link(&mut self, id: Id, url: &str, cx: &mut Context<Self>) {
-        let url = url.trim();
-        if url.is_empty() {
-            return;
-        }
-        let link_id = self.next_id();
-        if let Some(task) = self.task_mut(id)
-            && !task.links.iter().any(|l| l.url == url)
-        {
-            task.links.push(Link {
-                id: link_id,
-                url: url.to_string(),
-            });
-            self.commit_task(id, cx);
-        }
-    }
-
-    pub fn delete_link(&mut self, id: Id, link_id: Id, cx: &mut Context<Self>) {
-        if let Some(task) = self.task_mut(id) {
-            task.links.retain(|l| l.id != link_id);
-            self.commit_task(id, cx);
-        }
-    }
-
-    pub fn add_log(&mut self, id: Id, text: &str, cx: &mut Context<Self>) {
-        let text = text.trim();
-        if text.is_empty() {
-            return;
-        }
-        let entry_id = self.next_id();
-        if let Some(task) = self.task_mut(id) {
-            task.log.push(LogEntry {
-                id: entry_id,
-                at: Utc::now(),
-                text: text.to_string(),
-            });
-            self.commit_task(id, cx);
-        }
-    }
-
-    pub fn delete_log(&mut self, id: Id, entry_id: Id, cx: &mut Context<Self>) {
-        if let Some(task) = self.task_mut(id) {
-            task.log.retain(|e| e.id != entry_id);
-            self.commit_task(id, cx);
-        }
+        let notes = task.notes.trim_end();
+        task.notes = if notes.is_empty() {
+            links_markdown(&new)
+        } else {
+            format!("{notes}\n\n{}", links_markdown(&new))
+        };
+        self.commit_task(id, cx);
     }
 
     pub fn toggle_done(&mut self, id: Id, cx: &mut Context<Self>) {
@@ -498,6 +459,13 @@ impl TaskStore {
     }
 }
 
+/// One labelled link per line (`- [PAY-88](…)`), or nothing.
+fn links_markdown(urls: &[String]) -> String {
+    urls.iter()
+        .map(|u| format!("- {}\n", link_markdown(u)))
+        .collect()
+}
+
 /// Writes `tasks/<id>/task.json` and `notes.md` (removed when empty).
 fn save_task_files(task: &Task) -> anyhow::Result<()> {
     let dir = Task::dir(task.id);
@@ -528,18 +496,18 @@ mod tests {
         let index = std::fs::read_to_string(dir.join(FILE)).unwrap();
         assert!(index.contains("\"version\": 2") && !index.contains("Plan"));
         assert!(dir.join(V1_BACKUP).exists());
-        assert_eq!(
-            std::fs::read_to_string(dir.join("tasks/5/notes.md")).unwrap(),
-            "# Plan\n- [ ] a"
-        );
+        let notes = std::fs::read_to_string(dir.join("tasks/5/notes.md")).unwrap();
+        assert!(notes.starts_with("# Plan\n- [ ] a\n\n## Links\n\n- [x.dev](https://x.dev)"));
+        assert!(notes.contains("## Work log") && notes.contains("did"));
 
         // Reload reads details back from the folder.
         let store = TaskStore::from_disk();
         let task = store.task(5).unwrap();
         assert_eq!(task.categories, vec![1]);
-        assert_eq!(task.notes, "# Plan\n- [ ] a");
-        assert_eq!(task.links.len(), 1);
-        assert_eq!(task.log[0].text, "did");
+        assert_eq!(task.notes, notes);
+        assert!(task.links.is_empty() && task.log.is_empty());
+        let details = std::fs::read_to_string(dir.join("tasks/5/task.json")).unwrap();
+        assert!(!details.contains("links") && !details.contains("log"));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

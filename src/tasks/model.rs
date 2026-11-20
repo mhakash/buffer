@@ -104,23 +104,25 @@ pub struct Task {
     /// Markdown notes (`tasks/<id>/notes.md`).
     #[serde(default, skip_serializing)]
     pub notes: String,
+    /// Pre-0.27 subtasks, links and work log: read only to move them into the notes
+    /// ([`Task::fold_legacy`]); they're checklists, links and log lines in the notes now.
     #[serde(default, skip_serializing)]
     pub subtasks: Vec<Subtask>,
     #[serde(default, skip_serializing)]
     pub links: Vec<Link>,
-    /// Timestamped progress entries, oldest first.
     #[serde(default, skip_serializing)]
     pub log: Vec<LogEntry>,
 }
 
-/// On-disk shape of `tasks/<id>/task.json`; notes are beside it in `notes.md`.
+/// On-disk shape of `tasks/<id>/task.json`; notes are beside it in `notes.md`. The lists are
+/// only in pre-0.27 files (moved into the notes on load) and are no longer written.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct TaskDetails {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subtasks: Vec<Subtask>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<Link>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub log: Vec<LogEntry>,
 }
 
@@ -180,14 +182,97 @@ pub struct LogEntry {
 }
 
 impl Task {
-    /// (done, total) subtasks.
-    pub fn subtask_progress(&self) -> (usize, usize) {
-        let done = self
-            .subtasks
-            .iter()
-            .filter(|s| s.completed_at.is_some())
-            .count();
-        (done, self.subtasks.len())
+    /// Moves pre-0.27 subtasks, links and work log into the notes as Markdown (a checklist,
+    /// a link list, a log newest first). True if there was anything to move.
+    pub fn fold_legacy(&mut self) -> bool {
+        if self.subtasks.is_empty() && self.links.is_empty() && self.log.is_empty() {
+            return false;
+        }
+        let mut sections = Vec::new();
+        if !self.subtasks.is_empty() {
+            let items: Vec<String> = self
+                .subtasks
+                .iter()
+                .map(|s| {
+                    let mark = if s.completed_at.is_some() { "x" } else { " " };
+                    format!("- [{mark}] {}", s.title)
+                })
+                .collect();
+            sections.push(format!("## Subtasks\n\n{}", items.join("\n")));
+        }
+        if !self.links.is_empty() {
+            let items: Vec<String> = self
+                .links
+                .iter()
+                .map(|l| format!("- {}", link_markdown(&l.url)))
+                .collect();
+            sections.push(format!("## Links\n\n{}", items.join("\n")));
+        }
+        if !self.log.is_empty() {
+            let items: Vec<String> = self
+                .log
+                .iter()
+                .rev()
+                .map(|e| format!("- {}{}", log_stamp(e.at), e.text))
+                .collect();
+            sections.push(format!("## Work log\n\n{}", items.join("\n")));
+        }
+        let notes = self.notes.trim_end();
+        let joined = sections.join("\n\n");
+        self.notes = if notes.is_empty() {
+            format!("{joined}\n")
+        } else {
+            format!("{notes}\n\n{joined}\n")
+        };
+        self.subtasks.clear();
+        self.links.clear();
+        self.log.clear();
+        true
+    }
+
+    /// (done, total) checklist items (`- [ ]` / `- [x]`) in the notes.
+    pub fn todo_progress(&self) -> (usize, usize) {
+        let mut in_fence = false;
+        let (mut done, mut total) = (0, 0);
+        for line in self.notes.lines() {
+            let line = line.trim_start();
+            if line.starts_with("```") {
+                in_fence = !in_fence;
+                continue;
+            }
+            let Some(rest) = line.strip_prefix(['-', '*', '+']) else {
+                continue;
+            };
+            if in_fence {
+                continue;
+            }
+            let rest = rest.trim_start();
+            if rest.starts_with("[ ]") {
+                total += 1;
+            } else if rest.starts_with("[x]") || rest.starts_with("[X]") {
+                total += 1;
+                done += 1;
+            }
+        }
+        (done, total)
+    }
+
+    /// Web links in the notes (Markdown link targets and bare URLs), in order, no duplicates.
+    pub fn web_links(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for word in self
+            .notes
+            .split(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | '<' | '>'))
+        {
+            let start = word.find("http://").or_else(|| word.find("https://"));
+            if let Some(start) = start {
+                let url = word[start..].trim_end_matches(['.', ',', ';', ']', '"', '\'']);
+                if url.len() > 8 && !out.iter().any(|u| u == url) {
+                    out.push(url.to_string());
+                }
+            }
+        }
+        out
     }
 
     pub fn is_done(&self) -> bool {
@@ -313,6 +398,20 @@ pub fn parse_quick_add(input: &str) -> QuickAdd {
     parsed
 }
 
+/// `[PAY-88](https://…/browse/PAY-88)`: a link labelled the way lists show it.
+pub fn link_markdown(url: &str) -> String {
+    let label = super::links::classify(url).label.replace(['[', ']'], "");
+    format!("[{label}]({url})")
+}
+
+/// `**Nov 20, 14:05** — `: start of a work-log line.
+pub fn log_stamp(at: DateTime<Utc>) -> String {
+    format!(
+        "**{}** — ",
+        at.with_timezone(&Local).format("%b %-d, %H:%M")
+    )
+}
+
 pub fn is_url(word: &str) -> bool {
     word.starts_with("https://") || word.starts_with("http://")
 }
@@ -374,6 +473,48 @@ mod tests {
         assert_eq!(parsed.links.len(), 1);
         let parsed = parse_quick_add("https://acme.atlassian.net/browse/PAY-88");
         assert_eq!(parsed.title, "PAY-88");
+    }
+
+    #[test]
+    fn legacy_details_fold_into_notes() {
+        let json = r#"{"id":1,"title":"x","priority":"high","created_at":"2026-01-01T00:00:00Z",
+            "notes":"Plan\n",
+            "subtasks":[{"id":2,"title":"a"},{"id":3,"title":"b","completed_at":"2026-01-01T00:00:00Z"}],
+            "links":[{"id":4,"url":"https://jira.x.com/browse/PAY-88"}],
+            "log":[{"id":5,"at":"2026-01-01T10:00:00Z","text":"first"},
+                   {"id":6,"at":"2026-01-02T10:00:00Z","text":"second"}]}"#;
+        let mut task: Task = serde_json::from_str(json).unwrap();
+        assert!(task.fold_legacy());
+        assert!(task.subtasks.is_empty() && task.links.is_empty() && task.log.is_empty());
+        assert!(
+            task.notes
+                .starts_with("Plan\n\n## Subtasks\n\n- [ ] a\n- [x] b\n\n## Links")
+        );
+        assert!(
+            task.notes
+                .contains("- [PAY-88](https://jira.x.com/browse/PAY-88)")
+        );
+        let second = task.notes.find("second").unwrap();
+        assert!(second < task.notes.find("first").unwrap(), "newest first");
+        assert!(!task.fold_legacy());
+        assert_eq!(task.todo_progress(), (1, 2));
+        assert_eq!(task.web_links(), ["https://jira.x.com/browse/PAY-88"]);
+    }
+
+    #[test]
+    fn notes_derive_progress_and_links() {
+        let mut task: Task = serde_json::from_str(
+            r#"{"id":1,"title":"x","priority":"high","created_at":"2026-01-01T00:00:00Z"}"#,
+        )
+        .unwrap();
+        task.notes = "- [ ] a\n  * [X] b\n```\n- [ ] code\n```\nsee https://x.dev/a, \
+                      [mr](<https://g.com/-/merge_requests/4>)"
+            .into();
+        assert_eq!(task.todo_progress(), (1, 2));
+        assert_eq!(
+            task.web_links(),
+            ["https://x.dev/a", "https://g.com/-/merge_requests/4"]
+        );
     }
 
     #[test]

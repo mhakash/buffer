@@ -1,5 +1,5 @@
-//! One task's details: properties, Markdown notes, subtasks, links (Jira/GitLab aware) and a
-//! work log. Owned by `Workspace`, which shows it as a resizable side panel or as a full page;
+//! One task's details: properties and notes — the same block editor and file list as the Notes
+//! page (checklists, links and log lines live in the notes; `/todo`, `/log`). Owned by `Workspace`, which shows it as a resizable side panel or as a full page;
 //! opened via `OpenTask` events from pages.
 
 use std::time::Duration;
@@ -18,14 +18,14 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     Animation, AnimationExt, AnyElement, Context, Entity, EventEmitter, FontWeight, Hsla,
-    SharedString, Subscription, Window, assets::IconName, div, ease_out_quint, prelude::*, px, rgb,
+    Subscription, Window, assets::IconName, div, ease_out_quint, prelude::*, px, rgb,
 };
 
 use super::tasks::due_label;
 use crate::{
-    components::{category_tag, confirm::confirm_delete, fx, icon_button, property_row},
+    components::{category_tag, file_list, icon_button, property_row},
     editor::{BlockEditor, BlockEditorEvent},
-    tasks::{Id, LinkKind, Task, TaskStore, classify, is_url},
+    tasks::{Id, Task, TaskStore},
 };
 
 /// Side-panel width bounds; the user drags the left edge between them.
@@ -68,9 +68,6 @@ pub struct TaskDetail {
     title: Entity<InputState>,
     notes: Entity<TextareaState>,
     due: Entity<DatePickerState>,
-    subtask_input: Entity<InputState>,
-    link_input: Entity<InputState>,
-    log_input: Entity<InputState>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -90,11 +87,6 @@ impl TaskDetail {
             editor
         });
         let due = cx.new(|cx| DatePickerState::new(window, cx).date_format("%a, %b %-d"));
-        let subtask_input = cx.new(|cx| InputState::new(window, cx).placeholder("Add a subtask"));
-        let link_input = cx
-            .new(|cx| InputState::new(window, cx).placeholder("Paste a Jira, GitLab or any link"));
-        let log_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("What did you do? Enter to log"));
 
         let subscriptions = vec![
             cx.observe(&store, |_, _, cx| cx.notify()),
@@ -131,17 +123,6 @@ impl TaskDetail {
                 this.store
                     .update(cx, |store, cx| store.set_due(id, date, cx));
             }),
-            Self::on_enter(&subtask_input, window, cx, |store, id, text, cx| {
-                store.add_subtask(id, text, cx)
-            }),
-            Self::on_enter(&link_input, window, cx, |store, id, text, cx| {
-                for word in text.split_whitespace().filter(|w| is_url(w)) {
-                    store.add_link(id, word, cx);
-                }
-            }),
-            Self::on_enter(&log_input, window, cx, |store, id, text, cx| {
-                store.add_log(id, text, cx)
-            }),
         ];
 
         Self {
@@ -153,36 +134,8 @@ impl TaskDetail {
             title,
             notes,
             due,
-            subtask_input,
-            link_input,
-            log_input,
             _subscriptions: subscriptions,
         }
-    }
-
-    /// Enter in `input` runs `apply` on the open task, then clears the input.
-    fn on_enter(
-        input: &Entity<InputState>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        apply: impl Fn(&mut TaskStore, Id, &str, &mut Context<TaskStore>) + 'static,
-    ) -> Subscription {
-        cx.subscribe_in(
-            input,
-            window,
-            move |this, input, event: &InputEvent, window, cx| {
-                let (InputEvent::PressEnter { .. }, Some(id)) = (event, this.task) else {
-                    return;
-                };
-                let text = input.read(cx).value().to_string();
-                if text.trim().is_empty() {
-                    return;
-                }
-                this.store
-                    .update(cx, |store, cx| apply(store, id, &text, cx));
-                input.update(cx, |input, cx| input.set_value("", window, cx));
-            },
-        )
     }
 
     pub fn task_id(&self) -> Option<Id> {
@@ -206,9 +159,6 @@ impl TaskDetail {
         self.due.update(cx, |d, cx| {
             d.set_date(task.due.map_or(Date::Single(None), Date::from), window, cx)
         });
-        for input in [&self.subtask_input, &self.link_input, &self.log_input] {
-            input.update(cx, |i, cx| i.set_value("", window, cx));
-        }
         cx.notify();
     }
 
@@ -585,262 +535,6 @@ impl TaskDetail {
                 }),
         )
     }
-
-    fn add_row(input: &Entity<InputState>, theme: &Theme) -> impl IntoElement {
-        h_flex()
-            .gap_2()
-            .px_3()
-            .rounded_xl()
-            .bg(theme.secondary)
-            .text_sm()
-            .child(
-                Icon::new(IconName::Plus)
-                    .small()
-                    .text_color(theme.muted_foreground),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .child(Input::new(input).appearance(false)),
-            )
-    }
-
-    fn render_subtasks(&self, task: &Task, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let id = task.id;
-        let (done, total) = task.subtask_progress();
-        let rows = task.subtasks.iter().map(|sub| {
-            let sub_id = sub.id;
-            let checked = sub.completed_at.is_some();
-            let group = SharedString::from(format!("sub-{sub_id}"));
-            h_flex()
-                .group(group.clone())
-                .gap_2()
-                .px_2()
-                .py_1()
-                .rounded_lg()
-                .hover(|s| s.bg(theme.secondary))
-                .child(
-                    Checkbox::new(("sub-check", sub_id))
-                        .checked(checked)
-                        .on_click(cx.listener(move |this, _: &bool, _, cx| {
-                            this.store
-                                .update(cx, |s, cx| s.toggle_subtask(id, sub_id, cx));
-                        })),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_sm()
-                        .when(checked, |d| {
-                            d.line_through().text_color(theme.muted_foreground)
-                        })
-                        .child(sub.title.clone()),
-                )
-                .child(
-                    div()
-                        .opacity(0.)
-                        .group_hover(group, |s| s.opacity(1.))
-                        .child(
-                            icon_button(("sub-del", sub_id), IconName::X, theme.danger, "Remove")
-                                .on_click({
-                                    let what = sub.title.clone();
-                                    cx.listener(move |this, _, window, cx| {
-                                        let store = this.store.clone();
-                                        confirm_delete(
-                                            window,
-                                            cx,
-                                            "Remove subtask?",
-                                            format!("“{what}” will be removed."),
-                                            move |_, cx| {
-                                                store.update(cx, |s, cx| {
-                                                    s.delete_subtask(id, sub_id, cx)
-                                                });
-                                            },
-                                        );
-                                    })
-                                }),
-                        ),
-                )
-        });
-        let fraction = if total == 0 {
-            0.
-        } else {
-            done as f32 / total as f32
-        };
-        Self::section(
-            IconName::ListChecks,
-            "Subtasks",
-            (total > 0).then(|| format!("{done}/{total}")),
-            theme,
-        )
-        .when(total > 0, |this| {
-            this.child(fx::progress_bar(("sub-progress", id), fraction, theme))
-        })
-        .child(v_flex().children(rows))
-        .child(Self::add_row(&self.subtask_input, theme))
-        .into_any_element()
-    }
-
-    fn render_links(&self, task: &Task, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let id = task.id;
-        let rows = task.links.iter().map(|link| {
-            let link_id = link.id;
-            let url = link.url.clone();
-            let info = classify(&link.url);
-            let (icon, color) = match info.kind {
-                LinkKind::Jira => (IconName::Ticket, theme.chart_2),
-                LinkKind::MergeRequest | LinkKind::PullRequest => {
-                    (IconName::GitPullRequest, theme.chart_3)
-                }
-                LinkKind::Issue => (IconName::CircleDot, theme.chart_4),
-                LinkKind::Docs => (IconName::BookOpen, theme.chart_5),
-                LinkKind::Web => (IconName::Globe, theme.chart_1),
-            };
-            let group = SharedString::from(format!("link-{link_id}"));
-            h_flex()
-                .id(("link", link_id))
-                .group(group.clone())
-                .gap_3()
-                .p_2()
-                .rounded_xl()
-                .cursor_pointer()
-                .hover(|s| s.bg(theme.secondary))
-                .on_click(move |_, _, cx| cx.open_url(&url))
-                .child(
-                    div()
-                        .flex()
-                        .flex_none()
-                        .items_center()
-                        .justify_center()
-                        .size(px(30.))
-                        .rounded_lg()
-                        .bg(color.opacity(0.15))
-                        .child(Icon::new(icon).small().text_color(color)),
-                )
-                .child(
-                    v_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .truncate()
-                                .child(info.label),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .truncate()
-                                .child(info.detail),
-                        ),
-                )
-                .child(
-                    h_flex()
-                        .opacity(0.)
-                        .group_hover(group, |s| s.opacity(1.))
-                        .child(
-                            Icon::new(IconName::ExternalLink)
-                                .xsmall()
-                                .text_color(theme.muted_foreground),
-                        )
-                        .child(
-                            icon_button(("link-del", link_id), IconName::X, theme.danger, "Remove")
-                                .on_click({
-                                    let what = link.url.clone();
-                                    cx.listener(move |this, _, window, cx| {
-                                        cx.stop_propagation();
-                                        let store = this.store.clone();
-                                        confirm_delete(
-                                            window,
-                                            cx,
-                                            "Remove link?",
-                                            format!("“{what}” will be removed."),
-                                            move |_, cx| {
-                                                store.update(cx, |s, cx| {
-                                                    s.delete_link(id, link_id, cx)
-                                                });
-                                            },
-                                        );
-                                    })
-                                }),
-                        ),
-                )
-        });
-        Self::section(IconName::Link, "Links", None, theme)
-            .child(v_flex().children(rows))
-            .child(Self::add_row(&self.link_input, theme))
-            .into_any_element()
-    }
-
-    fn render_log(&self, task: &Task, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let id = task.id;
-        let entries = task.log.iter().rev().map(|entry| {
-            let entry_id = entry.id;
-            let group = SharedString::from(format!("log-{entry_id}"));
-            h_flex()
-                .group(group.clone())
-                .items_start()
-                .gap_3()
-                .child(
-                    v_flex()
-                        .items_center()
-                        .pt_1p5()
-                        .child(div().size_2().rounded_full().bg(theme.chart_1))
-                        .child(div().w(px(1.)).min_h(px(18.)).flex_1().bg(theme.border)),
-                )
-                .child(
-                    v_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .pb_2()
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child(when(entry.at)),
-                        )
-                        .child(div().text_sm().child(entry.text.clone())),
-                )
-                .child(
-                    div()
-                        .opacity(0.)
-                        .group_hover(group, |s| s.opacity(1.))
-                        .child(
-                            icon_button(("log-del", entry_id), IconName::X, theme.danger, "Remove")
-                                .on_click({
-                                    let what = entry.text.clone();
-                                    cx.listener(move |this, _, window, cx| {
-                                        let store = this.store.clone();
-                                        confirm_delete(
-                                            window,
-                                            cx,
-                                            "Remove log entry?",
-                                            format!("“{what}” will be removed."),
-                                            move |_, cx| {
-                                                store.update(cx, |s, cx| {
-                                                    s.delete_log(id, entry_id, cx)
-                                                });
-                                            },
-                                        );
-                                    })
-                                }),
-                        ),
-                )
-        });
-        Self::section(
-            IconName::ScrollText,
-            "Work log",
-            (!task.log.is_empty()).then(|| task.log.len().to_string()),
-            theme,
-        )
-        .child(Self::add_row(&self.log_input, theme))
-        .child(v_flex().pt_1().children(entries))
-        .into_any_element()
-    }
 }
 
 impl Render for TaskDetail {
@@ -869,9 +563,12 @@ impl Render for TaskDetail {
                     .pb_10()
                     .gap_7()
                     .child(self.render_notes(&theme, cx))
-                    .child(self.render_subtasks(&task, &theme, cx))
-                    .child(self.render_links(&task, &theme, cx))
-                    .child(self.render_log(&task, &theme, cx)),
+                    .children(file_list(
+                        "task-file",
+                        &task.notes,
+                        &TaskStore::task_dir(task.id),
+                        &theme,
+                    )),
             );
 
         let panel = v_flex()

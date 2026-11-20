@@ -34,8 +34,8 @@ vault.rs       vault.json (app dir, 0600): secrets & config for block scripts, a
 prefs.rs       settings.json (appearance, name, ambient) as a Global; prefs::update saves + repaints
 theme.rs       Appearance → kit Theme; loads themes/buffer.json (watched in debug)
 workspace.rs   `Shell` (window root: bg, `components::aurora::Aurora` view, cached `Workspace` view, dialog scrim) · `Workspace`: TitleBar | custom sidebar | active page; owns TaskStore + FocusTimer
-tasks/         model.rs (Task + Subtask/Link/LogEntry, parse_quick_add, streak stats) · links.rs (URL → Jira/MR/… label) · store.rs (TaskStore entity)
-pages/task_detail.rs  side panel / full page (`full_page`); Workspace sizes it (`prefs.detail_width`, `ResizePanel` drag)
+tasks/         model.rs (Task; legacy Subtask/Link/LogEntry only read to fold into notes via `fold_legacy`; checklist/link badges derived from notes; parse_quick_add, streak stats) · links.rs (URL → Jira/MR/… label) · store.rs (TaskStore entity)
+pages/task_detail.rs  properties + the shared notes editor and `components::file_list` (same feature set as Notes); side panel / full page (`full_page`); Workspace sizes it (`prefs.detail_width`, `ResizePanel` drag)
 focus/         FocusTimer entity (pomodoro, focus.json)
 notes/         NoteStore entity (notes.json index + notes/<id>.md; first line = title via split/compose); pages/notes.rs = list + document panes, fills the content area itself (Workspace skips the max-width wrapper)
 blocks/        programmatic blocks: ```` ```block <name> ```` fence → script in `blocks/<name>/` (workspace) → Markdown, cached in `.cache/blocks/`; `Blocks` global (reloaded in `Content::load`; `reload_if_changed` on window activation + Workspace's 15 s tick picks up on-disk edits), runs on a thread via login shell; table in `blocks/mod.rs`

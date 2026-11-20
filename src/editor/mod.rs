@@ -290,6 +290,9 @@ impl BlockEditor {
         {
             return;
         }
+        if let Some(prev) = self.active.filter(|prev| *prev != ix) {
+            self.label_bare_link(prev, cx);
+        }
         // Edits made in the block being left become one undo step.
         self.checkpoint();
         let block = &self.doc.blocks[ix];
@@ -323,9 +326,26 @@ impl BlockEditor {
     }
 
     fn deactivate(&mut self, cx: &mut Context<Self>) {
+        if let Some(ix) = self.active {
+            self.label_bare_link(ix, cx);
+        }
         if self.active.take().is_some() {
             self.slash = None;
             cx.notify();
+        }
+    }
+
+    /// A text block left holding only a URL (pasted) gets a readable label:
+    /// `[PAY-88](https://…/browse/PAY-88)`.
+    fn label_bare_link(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let Some(block) = self.doc.blocks.get_mut(ix) else {
+            return;
+        };
+        let url = block.text.trim();
+        if block.kind.is_text() && crate::tasks::is_url(url) && !url.contains(char::is_whitespace) {
+            let text = crate::tasks::link_markdown(url);
+            block.set_text(text);
+            self.changed(cx);
         }
     }
 

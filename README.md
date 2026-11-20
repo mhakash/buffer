@@ -65,7 +65,7 @@ Settings → Data → Show in Finder opens the active one.
 | File | Contents |
 |---|---|
 | `tasks.json` | Index: task titles, priority, order, categories, dates + the category list |
-| `tasks/<id>/task.json` | That task's subtasks, links, work log |
+| `tasks/<id>/task.json` | Reserved for task details (empty since 0.27; subtasks, links and log live in `notes.md`) |
 | `tasks/<id>/notes.md` | That task's notes (plain Markdown; edit it in any editor while the app is closed) |
 | `tasks/<id>/files/` | Files uploaded to that task's notes or made in them |
 | `notes.json` | Notes index: ids, created/edited times, tags, properties |
@@ -91,12 +91,12 @@ Type in the composer and press Enter. Inline tokens (anywhere in the text):
 |---|---|
 | `#name` | Category, repeatable (`#work #review`); matched loosely (`#follow-up` = "Follow-up"), created if new |
 | `!urgent` `!high` `!medium` `!low` (or `!1`–`!4`) | Priority |
-| `https://…` | Attached as a link (Jira/GitLab/GitHub recognised); a link alone becomes the title, e.g. `PAY-88` |
+| `https://…` | Added to the task's notes as a labelled link (Jira/GitLab/GitHub recognised); a link alone becomes the title, e.g. `PAY-88` |
 | `\#` `\!` `\\` | Literal `#`, `!`, or `\` in the title (prefix the word, e.g. `\#channel`) |
 
 Without tokens, the priority and category pills at the end of the input apply (each opens a menu; categories toggle, pick several). Hover a task for actions:
 drag the handle to reorder within a priority group (preview while dragging; saved on release), cycle priority, edit, delete (Undo pill stays 8 s).
-Every delete/remove ✕ (tasks, subtasks, links, log entries, categories) opens a confirmation dialog first.
+Every delete/remove ✕ (tasks, categories, properties) opens a confirmation dialog first.
 Tick the checkbox to complete (row slides out, a toast cheers you on); Done groups by day.
 The hero card above shows today's progress ring, your streak (consecutive days with a completion)
 and the last 7 days.
@@ -112,13 +112,16 @@ side panel → closed. The folder button reveals the task's files in Finder.
 |---|---|
 | Title | Done checkbox + inline-editable title; "Edited …" time in the toolbar |
 | Properties | Status, priority (click to cycle), categories (+ menu toggles any number), due date (overdue shows red), created |
-| Notes | Same block editor as the Notes page (see Block editor), compact in the side panel; Markdown / Rich text toggles the source |
-| Subtasks | Checklist with progress bar; Enter adds |
-| Links | Paste URLs, Enter adds. Jira → `PAY-88`, GitLab MR → `!412`, issues → `#7`, GitHub PRs, Confluence pages; click opens in browser |
-| Work log | Timestamped entries (newest first) for what you did |
+| Notes | Same block editor and file list as the Notes page (see Block editor, Files), compact in the side panel; Markdown / Rich text toggles the source |
 
-List rows show the due date and badges for subtasks (`2/5`), links (label or count), notes and log
-entries; more than two categories collapse into `+n`.
+Subtasks, links and the work log are part of the notes: a checklist (`/todo`), pasted links and
+log lines (`/log`), available in any note. Tasks from before 0.27 had them as separate lists; on
+first launch each task's lists are appended to its notes (`## Subtasks`, `## Links`,
+`## Work log`, newest entry first) and the old `task.json` is kept as `task.v2-backup.json`.
+Links typed in quick add land in the notes too.
+
+List rows show the due date and badges read from the notes: checklist progress (`2/5`), links
+(label or count) and a notes icon; more than two categories collapse into `+n`.
 Focus → "Up next" opens the same panel.
 
 ## Focus
@@ -151,6 +154,8 @@ Files are plain links in the content. In the block editor:
 |---|---|
 | `/upload` (Upload file) | Pick files; each is copied next to the note and linked on its own line |
 | `/link` (Link file) | Pick files; linked where they are (nothing copied) |
+| `/log` (Log entry) | Bullet starting with the current time (`**Nov 20, 14:05** — `), for a work log |
+| A line holding only a URL | Labelled when you leave it: Jira → `[PAY-88](…)`, GitLab MR → `!412`, issues → `#7`, GitHub PRs, Confluence pages |
 | `/txt` (Text file) | Makes `untitled.txt`, links it and opens it with the name selected: type a name (`body.json`), Enter, paste the content |
 | Drag files from Finder | Copied and linked where they're dropped (a line shows where) |
 

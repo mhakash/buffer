@@ -18,9 +18,8 @@ use gpui_kit::{
 
 use super::task_detail::when;
 use crate::{
-    components::{category_tag, confirm::confirm_delete, file_editor, icon_button, property_row},
+    components::{category_tag, confirm::confirm_delete, file_list, icon_button, property_row},
     editor::{BlockEditor, BlockEditorEvent},
-    files,
     notes::{Note, NoteId, NoteStore},
     tasks::{TaskStore, is_url},
 };
@@ -738,113 +737,6 @@ impl NotesPage {
         self.blocks.clone().into_any_element()
     }
 
-    /// Files the note links to (uploaded, linked or made in the app), read from its content:
-    /// click opens one (text files in the editor dialog), hover shows it in Finder.
-    fn render_files(&self, note: &Note, theme: &Theme) -> Option<AnyElement> {
-        let links = files::local_links(note.split().content);
-        if links.is_empty() {
-            return None;
-        }
-        let dir = NoteStore::dir();
-        let rows = links.into_iter().enumerate().map(|(ix, link)| {
-            let path = files::resolve(&link.target, &dir);
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| link.target.clone());
-            let meta = std::fs::metadata(&path).ok().filter(|m| m.is_file());
-            let missing = meta.is_none();
-            let inside = path.starts_with(&dir);
-            let detail = match (&meta, inside) {
-                (None, _) => "Missing".to_string(),
-                (Some(m), true) => files::human_size(m.len()),
-                (Some(m), false) => format!("Linked · {}", files::human_size(m.len())),
-            };
-            let icon = match files::kind(&name) {
-                files::Kind::Text => IconName::FileText,
-                files::Kind::Image => IconName::FileImage,
-                files::Kind::Other => IconName::File,
-            };
-            let group = SharedString::from(format!("note-file-{ix}"));
-            let (open, reveal) = (path.clone(), path.clone());
-            h_flex()
-                .id(("note-file", ix))
-                .group(group.clone())
-                .h(px(30.))
-                .px_2()
-                .ml(px(-8.))
-                .gap_2()
-                .rounded_xl()
-                .cursor_pointer()
-                .hover(|s| s.bg(theme.secondary))
-                .child(Icon::new(icon).small().text_color(if missing {
-                    theme.muted_foreground
-                } else {
-                    theme.chart_1
-                }))
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .text_sm()
-                        .when(missing, |d| {
-                            d.text_color(theme.muted_foreground).line_through()
-                        })
-                        .child(name),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(detail),
-                )
-                .child(div().flex_1())
-                .when(!missing, |row| {
-                    row.child(
-                        div()
-                            .opacity(0.)
-                            .group_hover(group, |s| s.opacity(1.))
-                            .child(
-                                icon_button(
-                                    ("note-file-reveal", ix),
-                                    IconName::FolderOpen,
-                                    theme.muted_foreground,
-                                    "Show in Finder",
-                                )
-                                .xsmall()
-                                .on_click(move |_, _, cx| {
-                                    cx.stop_propagation();
-                                    cx.reveal_path(&reveal);
-                                }),
-                            ),
-                    )
-                })
-                .on_click(move |_, window, cx| file_editor::open_path(open.clone(), window, cx))
-        });
-        Some(
-            v_flex()
-                .pt_3()
-                .border_t_1()
-                .border_color(theme.border)
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .pb_1()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(
-                            Icon::new(IconName::Paperclip)
-                                .xsmall()
-                                .text_color(theme.muted_foreground),
-                        )
-                        .child("Files in this note"),
-                )
-                .children(rows)
-                .into_any_element(),
-        )
-    }
-
     fn render_empty(&self, theme: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .id("notes-empty")
@@ -931,7 +823,12 @@ impl Render for NotesPage {
                             )
                             .child(self.render_properties(note, &theme, cx))
                             .child(self.render_body())
-                            .children(self.render_files(note, &theme)),
+                            .children(file_list(
+                                "note-file",
+                                note.split().content,
+                                &NoteStore::dir(),
+                                &theme,
+                            )),
                     )
                     .into_any_element(),
                 None => v_flex()

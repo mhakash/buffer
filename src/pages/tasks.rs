@@ -368,9 +368,7 @@ impl TasksPage {
             match editing {
                 Some(id) => {
                     store.update_task(id, parsed.title, priority, categories, cx);
-                    for url in &parsed.links {
-                        store.add_link(id, url, cx);
-                    }
+                    store.add_links(id, &parsed.links, cx);
                 }
                 None => {
                     store.add_task(parsed.title, priority, categories, parsed.links, cx);
@@ -1285,7 +1283,8 @@ impl TasksPage {
                 .child(Icon::new(icon).xsmall().text_color(muted))
                 .child(label)
         };
-        let (sub_done, sub_total) = task.subtask_progress();
+        let (sub_done, sub_total) = task.todo_progress();
+        let links = task.web_links();
         let today = Local::now().date_naive();
         // Title wins the space: badges and tags shrink and clip before it truncates.
         let badges = h_flex()
@@ -1315,18 +1314,15 @@ impl TasksPage {
                     format!("{sub_done}/{sub_total}"),
                 ))
             })
-            .when(!task.links.is_empty(), |this| {
-                let label = match task.links.as_slice() {
-                    [only] => classify(&only.url).label,
+            .when(!links.is_empty(), |this| {
+                let label = match links.as_slice() {
+                    [only] => classify(only).label,
                     many => many.len().to_string(),
                 };
                 this.child(badge(IconName::Link, label))
             })
             .when(!task.notes.trim().is_empty(), |this| {
                 this.child(Icon::new(IconName::NotebookPen).xsmall().text_color(muted))
-            })
-            .when(!task.log.is_empty(), |this| {
-                this.child(badge(IconName::ScrollText, task.log.len().to_string()))
             });
         let row = row
             .child(

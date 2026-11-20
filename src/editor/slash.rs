@@ -63,7 +63,7 @@ pub(super) fn block_types() -> Vec<BlockType> {
         ),
         item(
             "To-do list",
-            "todo task checkbox check",
+            "todo task checkbox check checklist subtask",
             IconName::ListTodo,
             Kind::Todo(false),
         ),
@@ -139,6 +139,19 @@ fn slash_items(query: &str, files: bool, cx: &App) -> Vec<SlashItem> {
             custom: false,
             file: None,
         });
+    // A work-log line: a bullet starting with the current time.
+    let log = ["log entry worklog timestamp now journal progress"]
+        .into_iter()
+        .filter(|keywords| "log entry".contains(query) || keywords.contains(query))
+        .map(|_| SlashItem {
+            label: "Log entry".into(),
+            icon: Icon::new(IconName::ScrollText),
+            kind: Kind::Bullet,
+            text: crate::tasks::log_stamp(chrono::Utc::now()),
+            custom: false,
+            file: None,
+        });
+    let builtin = builtin.chain(log);
     let file = file_items()
         .into_iter()
         .filter(|(action, ..)| files || *action == FileAction::Link)
@@ -298,7 +311,14 @@ impl BlockEditor {
         self.slash = None;
         match item.file {
             Some(action) => self.file_action(ix, action, window, cx),
-            None => self.convert(ix, item.kind, item.text, window, cx),
+            None => {
+                // Prefilled text (a log line's time): keep writing after it.
+                let end = item.kind.is_text() && !item.text.is_empty();
+                self.convert(ix, item.kind, item.text, window, cx);
+                if end {
+                    self.activate(ix, super::Caret::End, window, cx);
+                }
+            }
         }
     }
 
