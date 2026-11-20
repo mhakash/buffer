@@ -77,10 +77,12 @@ pub fn output_view(
     dir: PathBuf,
 ) -> TextView {
     let images = dir.clone();
+    let links = dir.clone();
     TextView::markdown(id, text)
         .style(style)
         .selectable(true)
         .image_source(move |uri| resolve_image(uri, &images))
+        .on_link_click(move |url, _, _, cx| open_link(url, &links, cx))
         // Replaces the extension set, so it goes before the plugins.
         .markdown_extensions(MarkdownExtensions::default().frontmatter())
         .plugin(FrontmatterPlugin)
@@ -104,6 +106,27 @@ fn resolve_image(uri: &SharedUri, dir: &Path) -> ImageSource {
         None => dir.join(path), // `join` keeps absolute paths as they are
     };
     path.into()
+}
+
+/// URLs open in the browser (or their app); anything else is a file path, resolved like
+/// images (relative to the note's folder, `~/`, `file://`), opened in its default app.
+fn open_link(url: &str, dir: &Path, cx: &mut App) {
+    let has_scheme = url.split_once(':').is_some_and(|(scheme, _)| {
+        scheme.len() > 1
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
+    });
+    if has_scheme && !url.starts_with("file://") {
+        cx.open_url(url);
+        return;
+    }
+    let path = crate::notes::files::percent_decode(url.strip_prefix("file://").unwrap_or(url));
+    let path = match path.strip_prefix("~/") {
+        Some(rest) => dirs::home_dir().unwrap_or_default().join(rest),
+        None => dir.join(&path),
+    };
+    cx.open_with_system(&path);
 }
 
 fn data_image(url: &str) -> Option<Arc<Image>> {

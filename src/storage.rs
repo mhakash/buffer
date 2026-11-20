@@ -196,6 +196,37 @@ pub fn copy(from: &str, to: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Writes `bytes` to `file` atomically; unlike [`save_text`], empty content keeps the file.
+pub fn save_bytes(file: &str, bytes: &[u8]) -> anyhow::Result<()> {
+    write_atomic(&path(file), bytes)
+}
+
+/// Copies a file from anywhere on disk to `to` (relative to the data dir), creating folders.
+pub fn copy_in(from: &Path, to: &str) -> anyhow::Result<()> {
+    let to = path(to);
+    if let Some(dir) = to.parent() {
+        fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    fs::copy(from, &to)
+        .with_context(|| format!("copying {} to {}", from.display(), to.display()))?;
+    Ok(())
+}
+
+/// Renames `from` to `to` (both relative to the data dir).
+pub fn rename(from: &str, to: &str) -> anyhow::Result<()> {
+    fs::rename(path(from), path(to)).with_context(|| format!("renaming {from} to {to}"))
+}
+
+/// Removes a file; missing is fine.
+pub fn remove_file(file: &str) -> anyhow::Result<()> {
+    match fs::remove_file(path(file)) {
+        Err(err) if err.kind() != io::ErrorKind::NotFound => {
+            Err(err).with_context(|| format!("removing {file}"))
+        }
+        _ => Ok(()),
+    }
+}
+
 /// A crash mid-write leaves the previous file intact.
 fn write_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     write_atomic_mode(path, bytes, 0o644)

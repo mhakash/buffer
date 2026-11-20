@@ -67,8 +67,9 @@ Settings → Data → Show in Finder opens the active one.
 | `tasks.json` | Index: task titles, priority, order, categories, dates + the category list |
 | `tasks/<id>/task.json` | That task's subtasks, links, work log |
 | `tasks/<id>/notes.md` | That task's notes (plain Markdown; edit it in any editor while the app is closed) |
-| `notes.json` | Notes index: ids, created/edited times, tags, properties |
+| `notes.json` | Notes index: ids, created/edited times, tags, properties, attached files (`files`: `name`, `path` only for linked files, `added_at`) |
 | `notes/<id>.md` | One standalone note (plain Markdown) |
+| `notes/<id>/` | That note's uploaded and in-app text files |
 | `focus.json` | Focus length + log of finished focus sessions. |
 | `blocks/<name>/block.json` + script | A custom block type (see Custom blocks) |
 | `.cache/blocks/<key>.json` | Last output of each custom block (safe to delete) |
@@ -140,6 +141,25 @@ confirmation).
 Properties under the title: Created, Edited, Tags (the task categories; + toggles), and any
 number of your own text properties ("Add a property" → name, Enter → value). Click a value to
 edit it; URL values get an open button; hover a row to remove it.
+
+### Files
+
+The **Files** row under Tags holds a note's documents; + adds one:
+
+| Add | Effect |
+|---|---|
+| Upload file… | Copies the files into `notes/<id>/` (a name clash gets ` (2)`) |
+| Link file… | References the file where it is (nothing copied); shows **Missing** if it moves |
+| New text file | Makes `untitled.txt` and opens it in the editor; rename it in the dialog's name field (`.json`, `.py`, …) |
+
+Click a file to open it: text files stored with the note (≤ 4 MB) open in an editor dialog
+(line numbers, saved as you type; copy-contents and copy-link buttons); anything else opens in its
+default app. Hover a row to copy its Markdown link, show it in Finder, or remove it (with
+confirmation; an uploaded file is deleted, a linked one only unlinked). Paste the copied link
+into the note to refer to the file: `[spec.pdf](<3/spec.pdf>)` (images as `![…](…)`, which
+embed). Links in a note open local paths (relative to `notes/`, `~/…`, absolute) in their
+default app. Renaming a file rewrites links to it in the note. Search matches file names;
+deleting a note deletes its folder.
 
 ### Block editor
 
@@ -242,7 +262,7 @@ pulsing indicators (saves battery); they also pause while the window is in the b
 | `src/prefs.rs` | `settings.json` (appearance, name, ambient) as a global |
 | `src/theme.rs` | Light/dark appearance over gpui-kit's `Theme`; loads `themes/` |
 | `src/focus/` | `FocusTimer` entity (pomodoro state, `focus.json`) |
-| `src/notes/` | `NoteStore` entity (`notes.json` + `notes/<id>.md`) |
+| `src/notes/` | `NoteStore` entity (`notes.json` + `notes/<id>.md`); `files.rs` = attached files (names, kinds, text sniffing) |
 | `src/editor/` | Block editor for notes and task notes; `mod.rs` lists its files |
 | `src/blocks/` | Custom blocks: model + fence config, store, script runner, cache/trust, starter script; `mod.rs` lists its files |
 | `src/net.rs` | HTTP client GPUI uses for remote images |

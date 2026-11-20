@@ -1,6 +1,6 @@
 [package]
 name = "buffer"
-version = "0.24.1"
+version = "0.25.0"
 edition = "2024"
 description = "Desktop app for work tooling, built on GPUI"
 publish = false
