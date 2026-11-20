@@ -18,6 +18,7 @@
 //! | `ops` | structural changes on block ranges |
 //! | `clipboard` | copy / cut / paste |
 //! | `drag` | drag handle, drop indicator |
+//! | `files` | file links: `/` upload, link, new text file; files dropped from Finder |
 //! | `block_menu` | the handle's menu |
 //! | `render` | how blocks look |
 
@@ -25,6 +26,7 @@ mod block_menu;
 mod clipboard;
 mod drag;
 mod editing;
+mod files;
 mod history;
 mod keymap;
 mod keys;
@@ -103,6 +105,8 @@ pub struct BlockEditor {
     dir: PathBuf,
     /// Smaller type and a grip-only gutter, for the task side panel.
     compact: bool,
+    /// Subfolder of `dir` that added files are copied into (`files::set_files`).
+    files: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -150,6 +154,7 @@ impl BlockEditor {
             focus_handle,
             dir: PathBuf::new(),
             compact: false,
+            files: None,
             _subscriptions: subscriptions,
         }
     }
@@ -422,6 +427,8 @@ impl Render for BlockEditor {
             .on_mouse_move(cx.listener(Self::on_pointer_move))
             .on_drag_move(cx.listener(Self::on_drag_move))
             .on_drop(cx.listener(Self::on_drop_blocks))
+            .on_drag_move(cx.listener(Self::on_drag_files))
+            .on_drop(cx.listener(Self::on_drop_files))
             .children(rows)
             .child(
                 div()

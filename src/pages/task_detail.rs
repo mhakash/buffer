@@ -85,6 +85,8 @@ impl TaskDetail {
         let blocks = cx.new(|cx| {
             let mut editor = BlockEditor::new(window, cx);
             editor.set_compact(true, cx);
+            // Files added to the notes go in `tasks/<id>/files/`.
+            editor.set_files(Some("files".into()));
             editor
         });
         let due = cx.new(|cx| DatePickerState::new(window, cx).date_format("%a, %b %-d"));

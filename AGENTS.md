@@ -37,11 +37,12 @@ workspace.rs   `Shell` (window root: bg, `components::aurora::Aurora` view, cach
 tasks/         model.rs (Task + Subtask/Link/LogEntry, parse_quick_add, streak stats) · links.rs (URL → Jira/MR/… label) · store.rs (TaskStore entity)
 pages/task_detail.rs  side panel / full page (`full_page`); Workspace sizes it (`prefs.detail_width`, `ResizePanel` drag)
 focus/         FocusTimer entity (pomodoro, focus.json)
-notes/         NoteStore entity (notes.json index + notes/<id>.md; first line = title via split/compose; files.rs = attachments in notes/<id>/ or linked by path); pages/notes.rs = list + document panes, fills the content area itself (Workspace skips the max-width wrapper)
+notes/         NoteStore entity (notes.json index + notes/<id>.md; first line = title via split/compose); pages/notes.rs = list + document panes, fills the content area itself (Workspace skips the max-width wrapper)
 blocks/        programmatic blocks: ```` ```block <name> ```` fence → script in `blocks/<name>/` (workspace) → Markdown, cached in `.cache/blocks/`; `Blocks` global (reloaded in `Content::load`; `reload_if_changed` on window activation + Workspace's 15 s tick picks up on-disk edits), runs on a thread via login shell; table in `blocks/mod.rs`
 editor/        Notion-style block editor used by notes and task notes (`load(md, image dir)`, `set_compact` for the side panel); one file per concern, table in `editor/mod.rs`. `model.rs` = Markdown ⇄ blocks (untouched blocks keep their source); owns its key bindings (`editor::init`)
 pages/         one Render view per sidebar page; Page enum lists them (`owns_panes`: Notes/Blocks fill the content area themselves). blocks.rs = custom block editor (explicit Save; every save bumps the type's revision). task_detail.rs = right panel owned by Workspace; pages `cx.emit(OpenTask(id))`, Workspace subscribes and opens it
 components/    thin fn wrappers over kit components + icon Assets; fx.rs = glow/gradient/ring/animations; markdown.rs = `markdown_view` (always use it for Markdown: Mermaid + frontmatter + clickable-image plugins, image resolver); lightbox.rs = full-window image view (Global; Workspace renders it last and routes keys via `capture_key`)
+files.rs      files in content are plain Markdown links (no index): copy/create/rename next to the note, `local_links` reads them back; editor/files.rs = `/upload` `/link` `/txt` + Finder drops; components/file_editor.rs = text-file dialog; local link clicks go through `markdown::open_link`
 net.rs        HttpClient for GPUI (ureq on a thread); without it remote images never load
 ```
 
@@ -96,6 +97,7 @@ API source of truth: `~/.cargo/registry/src/*/{gpui-pre-0.3.12,gpui-base-0.9.1,g
 | Box with `w_full` + `max_w` + `aspect_ratio` is far too tall | Taffy takes height from the unclamped width; also set `max_h` (see Mermaid in `components/markdown.rs`) |
 | SVG `img` shown larger than natural size is blurry (rasterized at natural × 2) | re-emit the SVG with scaled `width`/`height` (`scale_svg`) |
 | Synthetic Esc (CGEvent) ignored in UI checks | macOS routes Esc through the input context; set the event's unicode string to `\u{1b}` |
+| Enter in a single-line `Input` inside a kit dialog closes the dialog (the input propagates `Enter` → `Confirm`) | `.on_action(\|_: &Enter, …\|)` on a wrapper and don't propagate (see `components/file_editor.rs`) |
 | Global shortcuts | bind with `secondary-` (cmd on mac, ctrl elsewhere), `None` context; handle on `Workspace` root via `.on_action` |
 | Focus after page switch | `Workspace::navigate` must focus something rendered (composer or workspace handle) or actions stop dispatching |
 

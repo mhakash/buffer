@@ -124,7 +124,7 @@ impl BlockEditor {
     }
 
     /// Insertion index for a pointer at window `y`: before the first row whose middle is below.
-    fn drop_index(&self, y: Pixels) -> usize {
+    pub(super) fn drop_index(&self, y: Pixels) -> usize {
         let rows = self.row_bounds.borrow();
         rows.iter()
             .position(|b| y < b.center().y)

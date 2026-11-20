@@ -1,30 +1,27 @@
 //! Standalone Markdown notes, Notion-style: a list pane and a document pane that fill the
 //! content area. The title is always editable; the body is a Notion-style block editor
-//! (`editor`), or its Markdown source. Full view hides the list. Attached files sit under the
-//! properties; text files open in an editor dialog.
+//! (`editor`), or its Markdown source. Full view hides the list. Files are links in the
+//! content (`/file`, drag and drop); the ones it references are listed at the end.
 
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Icon, Sizable, Size, Theme, WindowExt,
+    ActiveTheme, Icon, Sizable, Size, Theme,
     button::{Button, ButtonRounded, ButtonVariants},
-    dialog::DialogEntrance,
     h_flex,
-    input::{Editor, EditorState, Escape, Input, InputEvent, InputState, Textarea, TextareaState},
+    input::{Escape, Input, InputEvent, InputState, Textarea, TextareaState},
     menu::{DropdownMenu, PopupMenuItem},
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, ClipboardItem, Context, Entity, FocusHandle, FontWeight, PathPromptOptions,
-    SharedString, Subscription, Window, assets::IconName, div, prelude::*, px, rgb,
+    AnyElement, Context, Entity, FocusHandle, FontWeight, SharedString, Subscription, Window,
+    assets::IconName, div, prelude::*, px, rgb,
 };
 
 use super::task_detail::when;
 use crate::{
-    components::{category_tag, confirm::confirm_delete, icon_button, property_row},
+    components::{category_tag, confirm::confirm_delete, file_editor, icon_button, property_row},
     editor::{BlockEditor, BlockEditorEvent},
-    notes::{
-        Note, NoteId, NoteStore,
-        files::{self, Kind},
-    },
+    files,
+    notes::{Note, NoteId, NoteStore},
     tasks::{TaskStore, is_url},
 };
 
@@ -52,13 +49,6 @@ pub struct NotesPage {
     /// "Add a property" name field is open.
     adding_prop: bool,
     new_prop: Entity<InputState>,
-    /// Text file open in the editor dialog: note and file name.
-    open_file: Option<(NoteId, String)>,
-    /// Its name field (Enter or leaving it renames the file).
-    file_name: Entity<InputState>,
-    /// Content last written, so re-emitted values don't bump the note's edit time.
-    file_text: SharedString,
-    file_subs: Vec<Subscription>,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -76,18 +66,7 @@ impl NotesPage {
         });
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search"));
         let blocks = cx.new(|cx| BlockEditor::new(window, cx));
-        let file_name = cx.new(|cx| InputState::new(window, cx).placeholder("File name"));
         let subscriptions = vec![
-            cx.subscribe_in(
-                &file_name,
-                window,
-                |this, input, event: &InputEvent, window, cx| {
-                    if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
-                        let value = input.read(cx).value().to_string();
-                        this.rename_open_file(&value, window, cx);
-                    }
-                },
-            ),
             // Keep a selection whenever there's a note (first launch, after a delete).
             cx.observe_in(&store, window, |this, _, window, cx| {
                 this.ensure_selection(window, cx);
@@ -190,10 +169,6 @@ impl NotesPage {
             prop_input,
             adding_prop: false,
             new_prop,
-            open_file: None,
-            file_name,
-            file_text: SharedString::default(),
-            file_subs: Vec::new(),
             selected: None,
             source: false,
             blocks,
@@ -249,8 +224,10 @@ impl NotesPage {
             .unwrap_or_default();
         self.title
             .update(cx, |t, cx| t.set_value(title, window, cx));
-        self.blocks
-            .update(cx, |b, cx| b.load(&content, NoteStore::dir(), cx));
+        self.blocks.update(cx, |b, cx| {
+            b.load(&content, NoteStore::dir(), cx);
+            b.set_files(Some(NoteStore::files_subdir(id)));
+        });
         cx.notify();
     }
 
@@ -342,224 +319,13 @@ impl NotesPage {
     /// A note left blank isn't worth keeping: leaving it removes it.
     fn drop_if_empty(&mut self, cx: &mut Context<Self>) {
         if let Some(id) = self.selected
-            && self.store.read(cx).note(id).is_some_and(Note::is_blank)
+            && self.store.read(cx).note(id).is_some_and(|n| {
+                n.text.trim().is_empty() && n.tags.is_empty() && n.props.is_empty()
+            })
         {
             self.selected = None;
             self.source = false;
             self.store.update(cx, |s, cx| s.delete(id, cx));
-        }
-    }
-
-    /// File picker → copy the files into the note (`link`: reference them where they are).
-    fn pick_files(&mut self, link: bool, cx: &mut Context<Self>) {
-        let Some(id) = self.selected else { return };
-        let paths = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: true,
-            prompt: Some(if link { "Link" } else { "Attach" }.into()),
-        });
-        cx.spawn(async move |this, cx| {
-            if let Ok(Ok(Some(paths))) = paths.await {
-                this.update(cx, |this, cx| {
-                    this.store
-                        .update(cx, |s, cx| s.attach(id, &paths, link, cx));
-                })
-                .ok();
-            }
-        })
-        .detach();
-    }
-
-    fn new_text_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.selected else { return };
-        if let Some(name) = self.store.update(cx, |s, cx| s.new_text_file(id, cx)) {
-            self.open_text(id, name, true, window, cx);
-        }
-    }
-
-    /// Stored text files open in the editor dialog; anything else in its default app.
-    fn open_file(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.selected else { return };
-        let Some(file) = self
-            .store
-            .read(cx)
-            .note(id)
-            .and_then(|n| n.files.get(ix))
-            .cloned()
-        else {
-            return;
-        };
-        let path = file.abs_path(id);
-        if !file.linked() && files::is_text(&path) {
-            self.open_text(id, file.name, false, window, cx);
-        } else if path.exists() {
-            cx.open_with_system(&path);
-        }
-    }
-
-    /// Editor dialog for a stored text file; every change is saved. `rename`: start in the name
-    /// field (a file just made).
-    fn open_text(
-        &mut self,
-        id: NoteId,
-        name: String,
-        rename: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let path = storage_path(id, &name);
-        let text = std::fs::read_to_string(&path).unwrap_or_default();
-        let language = language(&name);
-        let editor = cx.new(|cx| {
-            let mut state = EditorState::new(window, cx).language(language);
-            state.set_value(text.clone(), window, cx);
-            state
-        });
-        self.file_text = text.into();
-        self.open_file = Some((id, name.clone()));
-        self.file_name
-            .update(cx, |i, cx| i.set_value(name, window, cx));
-        self.file_subs = vec![cx.subscribe_in(
-            &editor,
-            window,
-            |this, editor, event: &InputEvent, _, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let value = editor.read(cx).value();
-                let Some((id, name)) = this.open_file.clone() else {
-                    return;
-                };
-                if value != this.file_text {
-                    this.file_text = value.clone();
-                    this.store
-                        .update(cx, |s, cx| s.write_file(id, &name, &value, cx));
-                }
-            },
-        )];
-
-        let page = cx.entity();
-        let name_input = self.file_name.clone();
-        let editor_state = editor.clone();
-        window.open_dialog(cx, move |dialog, _, cx| {
-            let theme = cx.theme().clone();
-            let link_page = page.clone();
-            let copy_editor = editor_state.clone();
-            dialog
-                .w(px(860.))
-                .entrance(DialogEntrance::FadeSlide)
-                .title(
-                    h_flex()
-                        .w_full()
-                        .pr_8()
-                        .gap_2()
-                        .child(
-                            Icon::new(IconName::FileText)
-                                .small()
-                                .text_color(theme.muted_foreground),
-                        )
-                        .child(
-                            div().flex_1().min_w_0().child(
-                                Input::new(&name_input)
-                                    .appearance(false)
-                                    .px_0()
-                                    .font_weight(FontWeight::SEMIBOLD),
-                            ),
-                        )
-                        .child(
-                            icon_button(
-                                "file-copy-text",
-                                IconName::Copy,
-                                theme.muted_foreground,
-                                "Copy contents",
-                            )
-                            .on_click(move |_, _, cx| {
-                                let text = copy_editor.read(cx).value().to_string();
-                                cx.write_to_clipboard(ClipboardItem::new_string(text));
-                            }),
-                        )
-                        .child(
-                            icon_button(
-                                "file-copy-link",
-                                IconName::Link,
-                                theme.muted_foreground,
-                                "Copy Markdown link (paste it into the note)",
-                            )
-                            .on_click(move |_, _, cx| {
-                                if let Some(md) = link_page.read(cx).open_file_markdown(cx) {
-                                    cx.write_to_clipboard(ClipboardItem::new_string(md));
-                                }
-                            }),
-                        ),
-                )
-                .child(
-                    div()
-                        .rounded_xl()
-                        .border_1()
-                        .border_color(theme.border)
-                        .overflow_hidden()
-                        .child(Editor::new(&editor_state).appearance(false).h(px(480.))),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child("Saved as you type"),
-                )
-        });
-        if rename {
-            self.file_name.update(cx, |i, cx| {
-                i.focus(window, cx);
-                i.select_all(window, cx);
-            });
-        } else {
-            editor.update(cx, |e, cx| e.focus(window, cx));
-        }
-        cx.notify();
-    }
-
-    fn open_file_markdown(&self, cx: &gpui_kit::App) -> Option<String> {
-        let (id, name) = self.open_file.as_ref()?;
-        let note = self.store.read(cx).note(*id)?;
-        Some(note.files.get(note.stored(name)?)?.markdown(*id))
-    }
-
-    fn rename_open_file(&mut self, value: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((id, name)) = self.open_file.clone() else {
-            return;
-        };
-        if value.trim().is_empty() {
-            self.file_name
-                .update(cx, |i, cx| i.set_value(name, window, cx));
-            return;
-        }
-        let Some(new) = self
-            .store
-            .update(cx, |s, cx| s.rename_file(id, &name, value, cx))
-        else {
-            return;
-        };
-        self.open_file = Some((id, new.clone()));
-        if value != new {
-            self.file_name
-                .update(cx, |i, cx| i.set_value(new, window, cx));
-        }
-        // Links to the file in the body were rewritten: show the new text.
-        if self.selected == Some(id) {
-            let content = self
-                .store
-                .read(cx)
-                .note(id)
-                .map(|n| n.split().content.to_string())
-                .unwrap_or_default();
-            if self.source {
-                self.editor
-                    .update(cx, |e, cx| e.set_value(content, window, cx));
-            } else {
-                self.blocks
-                    .update(cx, |b, cx| b.load(&content, NoteStore::dir(), cx));
-            }
         }
     }
 
@@ -951,171 +717,8 @@ impl NotesPage {
                         .child(picker),
                 ),
             )
-            .child(self.render_files(note, theme, cx))
             .children(props)
             .child(add)
-    }
-
-    /// Attached files: click opens (text files in the editor dialog), hover shows copy-link,
-    /// reveal and remove; + adds (upload, link, new text file).
-    fn render_files(&self, note: &Note, theme: &Theme, cx: &Context<Self>) -> impl IntoElement {
-        let id = note.id;
-        let page = cx.entity();
-        let add = Button::new("note-files-add")
-            .ghost()
-            .xsmall()
-            .rounded(ButtonRounded::Size(px(999.)))
-            .icon(Icon::new(IconName::Plus).text_color(theme.muted_foreground))
-            .when(note.files.is_empty(), |b| b.label("Add"))
-            .tooltip("Add a file")
-            .dropdown_menu(move |menu, _, _| {
-                let (upload, link, text) = (page.clone(), page.clone(), page.clone());
-                menu.item(
-                    PopupMenuItem::new("Upload file…")
-                        .icon(IconName::Upload)
-                        .on_click(move |_, _, cx| {
-                            upload.update(cx, |this, cx| this.pick_files(false, cx))
-                        }),
-                )
-                .item(
-                    PopupMenuItem::new("Link file…")
-                        .icon(IconName::Link)
-                        .on_click(move |_, _, cx| {
-                            link.update(cx, |this, cx| this.pick_files(true, cx))
-                        }),
-                )
-                .item(
-                    PopupMenuItem::new("New text file")
-                        .icon(IconName::FilePlus)
-                        .on_click(move |_, window, cx| {
-                            text.update(cx, |this, cx| this.new_text_file(window, cx))
-                        }),
-                )
-                .min_w(px(180.))
-            });
-
-        let rows = note.files.iter().enumerate().map(|(ix, file)| {
-            let group = SharedString::from(format!("note-file-{ix}"));
-            let path = file.abs_path(id);
-            let meta = std::fs::metadata(&path).ok().filter(|m| m.is_file());
-            let missing = meta.is_none();
-            let detail = match (&meta, file.linked()) {
-                (None, _) => "Missing".to_string(),
-                (Some(m), true) => format!("Linked · {}", files::human_size(m.len())),
-                (Some(m), false) => files::human_size(m.len()),
-            };
-            let icon = match file.kind() {
-                Kind::Text => IconName::FileText,
-                Kind::Image => IconName::FileImage,
-                Kind::Other => IconName::File,
-            };
-            let markdown = file.markdown(id);
-            let name = file.name.clone();
-            let linked = file.linked();
-            let tooltip_path = path.display().to_string();
-            h_flex()
-                .id(("note-file", ix))
-                .group(group.clone())
-                .h(px(32.))
-                .px_2()
-                .ml(px(-8.))
-                .gap_2()
-                .rounded_xl()
-                .cursor_pointer()
-                .hover(|s| s.bg(theme.secondary))
-                .child(Icon::new(icon).small().text_color(if missing {
-                    theme.muted_foreground
-                } else {
-                    theme.chart_1
-                }))
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        .text_sm()
-                        .when(missing, |d| d.text_color(theme.muted_foreground).line_through())
-                        .child(file.name.clone()),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child(detail),
-                )
-                .child(div().flex_1())
-                .child(
-                    h_flex()
-                        .flex_none()
-                        .opacity(0.)
-                        .group_hover(group, |s| s.opacity(1.))
-                        .child(
-                            icon_button(
-                                ("note-file-link", ix),
-                                IconName::Link,
-                                theme.muted_foreground,
-                                "Copy Markdown link (paste it into the note)",
-                            )
-                            .xsmall()
-                            .on_click(move |_, _, cx| {
-                                cx.stop_propagation();
-                                cx.write_to_clipboard(ClipboardItem::new_string(markdown.clone()));
-                            }),
-                        )
-                        .child(
-                            icon_button(
-                                ("note-file-reveal", ix),
-                                IconName::FolderOpen,
-                                theme.muted_foreground,
-                                format!("Show in Finder: {tooltip_path}"),
-                            )
-                            .xsmall()
-                            .disabled(missing)
-                            .on_click(move |_, _, cx| {
-                                cx.stop_propagation();
-                                cx.reveal_path(&path);
-                            }),
-                        )
-                        .child(
-                            icon_button(
-                                ("note-file-del", ix),
-                                IconName::X,
-                                theme.muted_foreground,
-                                if linked { "Remove link" } else { "Delete file" },
-                            )
-                            .xsmall()
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                cx.stop_propagation();
-                                let store = this.store.clone();
-                                let (title, body) = if linked {
-                                    (
-                                        "Remove link?",
-                                        format!("The link to “{name}” is removed; the file stays where it is."),
-                                    )
-                                } else {
-                                    (
-                                        "Delete file?",
-                                        format!("“{name}” will be deleted from this note."),
-                                    )
-                                };
-                                confirm_delete(window, cx, title, body, move |_, cx| {
-                                    store.update(cx, |s, cx| s.remove_file(id, ix, cx))
-                                });
-                            })),
-                        ),
-                )
-                .on_click(cx.listener(move |this, _, window, cx| this.open_file(ix, window, cx)))
-        });
-
-        property_row(IconName::Paperclip, "Files", theme)
-            .items_start()
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .children(rows)
-                    .child(h_flex().h(px(32.)).child(add)),
-            )
     }
 
     fn render_body(&self) -> AnyElement {
@@ -1133,6 +736,113 @@ impl NotesPage {
                 .into_any_element();
         }
         self.blocks.clone().into_any_element()
+    }
+
+    /// Files the note links to (uploaded, linked or made in the app), read from its content:
+    /// click opens one (text files in the editor dialog), hover shows it in Finder.
+    fn render_files(&self, note: &Note, theme: &Theme) -> Option<AnyElement> {
+        let links = files::local_links(note.split().content);
+        if links.is_empty() {
+            return None;
+        }
+        let dir = NoteStore::dir();
+        let rows = links.into_iter().enumerate().map(|(ix, link)| {
+            let path = files::resolve(&link.target, &dir);
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| link.target.clone());
+            let meta = std::fs::metadata(&path).ok().filter(|m| m.is_file());
+            let missing = meta.is_none();
+            let inside = path.starts_with(&dir);
+            let detail = match (&meta, inside) {
+                (None, _) => "Missing".to_string(),
+                (Some(m), true) => files::human_size(m.len()),
+                (Some(m), false) => format!("Linked · {}", files::human_size(m.len())),
+            };
+            let icon = match files::kind(&name) {
+                files::Kind::Text => IconName::FileText,
+                files::Kind::Image => IconName::FileImage,
+                files::Kind::Other => IconName::File,
+            };
+            let group = SharedString::from(format!("note-file-{ix}"));
+            let (open, reveal) = (path.clone(), path.clone());
+            h_flex()
+                .id(("note-file", ix))
+                .group(group.clone())
+                .h(px(30.))
+                .px_2()
+                .ml(px(-8.))
+                .gap_2()
+                .rounded_xl()
+                .cursor_pointer()
+                .hover(|s| s.bg(theme.secondary))
+                .child(Icon::new(icon).small().text_color(if missing {
+                    theme.muted_foreground
+                } else {
+                    theme.chart_1
+                }))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_sm()
+                        .when(missing, |d| {
+                            d.text_color(theme.muted_foreground).line_through()
+                        })
+                        .child(name),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(detail),
+                )
+                .child(div().flex_1())
+                .when(!missing, |row| {
+                    row.child(
+                        div()
+                            .opacity(0.)
+                            .group_hover(group, |s| s.opacity(1.))
+                            .child(
+                                icon_button(
+                                    ("note-file-reveal", ix),
+                                    IconName::FolderOpen,
+                                    theme.muted_foreground,
+                                    "Show in Finder",
+                                )
+                                .xsmall()
+                                .on_click(move |_, _, cx| {
+                                    cx.stop_propagation();
+                                    cx.reveal_path(&reveal);
+                                }),
+                            ),
+                    )
+                })
+                .on_click(move |_, window, cx| file_editor::open_path(open.clone(), window, cx))
+        });
+        Some(
+            v_flex()
+                .pt_3()
+                .border_t_1()
+                .border_color(theme.border)
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .pb_1()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(
+                            Icon::new(IconName::Paperclip)
+                                .xsmall()
+                                .text_color(theme.muted_foreground),
+                        )
+                        .child("Files in this note"),
+                )
+                .children(rows)
+                .into_any_element(),
+        )
     }
 
     fn render_empty(&self, theme: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1164,40 +874,6 @@ impl NotesPage {
                     .child("Meeting notes, snippets, ideas — click or press ⌘⇧N."),
             )
             .on_click(cx.listener(|this, _, window, cx| this.create(window, cx)))
-    }
-}
-
-/// Absolute path of a stored file of note `id`.
-fn storage_path(id: NoteId, name: &str) -> std::path::PathBuf {
-    crate::storage::path(&format!("{}/{name}", files::dir(id)))
-}
-
-/// Editor language from a file name (used for highlighting when the kit has it).
-fn language(name: &str) -> &'static str {
-    let ext = name
-        .rsplit_once('.')
-        .map(|(_, e)| e.to_lowercase())
-        .unwrap_or_default();
-    match ext.as_str() {
-        "json" | "jsonl" | "ndjson" => "json",
-        "yaml" | "yml" => "yaml",
-        "toml" => "toml",
-        "md" | "markdown" => "markdown",
-        "js" | "mjs" | "cjs" | "jsx" => "javascript",
-        "ts" | "tsx" => "typescript",
-        "py" => "python",
-        "rs" => "rust",
-        "go" => "go",
-        "rb" => "ruby",
-        "java" => "java",
-        "sh" | "bash" | "zsh" => "bash",
-        "sql" => "sql",
-        "html" | "htm" => "html",
-        "css" | "scss" => "css",
-        "xml" => "xml",
-        "c" | "h" => "c",
-        "cpp" | "cc" | "hpp" => "cpp",
-        _ => "text",
     }
 }
 
@@ -1254,7 +930,8 @@ impl Render for NotesPage {
                                     .font_weight(FontWeight::BOLD),
                             )
                             .child(self.render_properties(note, &theme, cx))
-                            .child(self.render_body()),
+                            .child(self.render_body())
+                            .children(self.render_files(note, &theme)),
                     )
                     .into_any_element(),
                 None => v_flex()

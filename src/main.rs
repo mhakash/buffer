@@ -2,6 +2,7 @@ mod actions;
 mod blocks;
 mod components;
 mod editor;
+mod files;
 mod focus;
 mod net;
 mod notes;

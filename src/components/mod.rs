@@ -5,6 +5,7 @@ pub mod aurora;
 mod card;
 mod chip;
 pub mod confirm;
+pub mod file_editor;
 pub mod fx;
 pub mod lightbox;
 mod markdown;

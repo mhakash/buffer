@@ -67,9 +67,10 @@ Settings → Data → Show in Finder opens the active one.
 | `tasks.json` | Index: task titles, priority, order, categories, dates + the category list |
 | `tasks/<id>/task.json` | That task's subtasks, links, work log |
 | `tasks/<id>/notes.md` | That task's notes (plain Markdown; edit it in any editor while the app is closed) |
-| `notes.json` | Notes index: ids, created/edited times, tags, properties, attached files (`files`: `name`, `path` only for linked files, `added_at`) |
+| `tasks/<id>/files/` | Files uploaded to that task's notes or made in them |
+| `notes.json` | Notes index: ids, created/edited times, tags, properties |
 | `notes/<id>.md` | One standalone note (plain Markdown) |
-| `notes/<id>/` | That note's uploaded and in-app text files |
+| `notes/<id>/` | Files uploaded to that note or made in it (linked from its content) |
 | `focus.json` | Focus length + log of finished focus sessions. |
 | `blocks/<name>/block.json` + script | A custom block type (see Custom blocks) |
 | `.cache/blocks/<key>.json` | Last output of each custom block (safe to delete) |
@@ -144,22 +145,24 @@ edit it; URL values get an open button; hover a row to remove it.
 
 ### Files
 
-The **Files** row under Tags holds a note's documents; + adds one:
+Files are plain links in the content. In the block editor:
 
-| Add | Effect |
+| Input | Effect |
 |---|---|
-| Upload file… | Copies the files into `notes/<id>/` (a name clash gets ` (2)`) |
-| Link file… | References the file where it is (nothing copied); shows **Missing** if it moves |
-| New text file | Makes `untitled.txt` and opens it in the editor; rename it in the dialog's name field (`.json`, `.py`, …) |
+| `/upload` (Upload file) | Pick files; each is copied next to the note and linked on its own line |
+| `/link` (Link file) | Pick files; linked where they are (nothing copied) |
+| `/txt` (Text file) | Makes `untitled.txt`, links it and opens it with the name selected: type a name (`body.json`), Enter, paste the content |
+| Drag files from Finder | Copied and linked where they're dropped (a line shows where) |
 
-Click a file to open it: text files stored with the note (≤ 4 MB) open in an editor dialog
-(line numbers, saved as you type; copy-contents and copy-link buttons); anything else opens in its
-default app. Hover a row to copy its Markdown link, show it in Finder, or remove it (with
-confirmation; an uploaded file is deleted, a linked one only unlinked). Paste the copied link
-into the note to refer to the file: `[spec.pdf](<3/spec.pdf>)` (images as `![…](…)`, which
-embed). Links in a note open local paths (relative to `notes/`, `~/…`, absolute) in their
-default app. Renaming a file rewrites links to it in the note. Search matches file names;
-deleting a note deletes its folder.
+Copies go in `notes/<id>/` (task notes: `tasks/<id>/files/`) and are linked relatively,
+`[spec.pdf](<3/spec.pdf>)`; images are embedded (`![…](…)`). Click a link to open it: text
+files (≤ 4 MB) open in an editor dialog (line numbers, saved as you type, copy contents, show
+in Finder); anything else opens in its default app. Any local link works the same, written by
+hand too (relative to the note's folder, `~/…`, absolute, `file://`).
+
+The end of a note lists every file it links to (size, **Linked**, or **Missing** if gone); click
+to open, hover to show in Finder. Renaming a new text file in its dialog rewrites its link.
+Deleting a link leaves the copied file on disk; deleting a note deletes its folder.
 
 ### Block editor
 
@@ -262,7 +265,8 @@ pulsing indicators (saves battery); they also pause while the window is in the b
 | `src/prefs.rs` | `settings.json` (appearance, name, ambient) as a global |
 | `src/theme.rs` | Light/dark appearance over gpui-kit's `Theme`; loads `themes/` |
 | `src/focus/` | `FocusTimer` entity (pomodoro state, `focus.json`) |
-| `src/notes/` | `NoteStore` entity (`notes.json` + `notes/<id>.md`); `files.rs` = attached files (names, kinds, text sniffing) |
+| `src/notes/` | `NoteStore` entity (`notes.json` + `notes/<id>.md`) |
+| `src/files.rs` | File links in content: copy/create/rename, kinds, text sniffing, links read back from Markdown |
 | `src/editor/` | Block editor for notes and task notes; `mod.rs` lists its files |
 | `src/blocks/` | Custom blocks: model + fence config, store, script runner, cache/trust, starter script; `mod.rs` lists its files |
 | `src/net.rs` | HTTP client GPUI uses for remote images |

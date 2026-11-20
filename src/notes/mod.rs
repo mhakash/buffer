@@ -1,17 +1,12 @@
 //! Standalone Markdown notes (not tied to a task). Index in `notes.json`, each body in
-//! `notes/<id>.md`, attached files in `notes/<id>/` (see [`files`]). All mutations go through
-//! `NoteStore`, which saves and notifies.
-
-pub mod files;
-
-use std::path::PathBuf;
+//! `notes/<id>.md`; files linked from a note's content live in `notes/<id>/` (see
+//! [`crate::files`]). All mutations go through `NoteStore`, which saves and notifies.
 
 use chrono::{DateTime, Utc};
 use gpui_kit::{Context, SharedString};
 use serde::{Deserialize, Serialize};
 
 use crate::{storage, tasks};
-pub use files::Attachment;
 
 pub type NoteId = u64;
 
@@ -33,9 +28,6 @@ pub struct Note {
     /// Free-form properties (Notion-style), in display order.
     #[serde(default)]
     pub props: Vec<Property>,
-    /// Attached files (uploaded, linked or made in the app), in display order.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub files: Vec<Attachment>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,29 +72,13 @@ impl Note {
             .unwrap_or_default()
     }
 
-    /// Text, a property value or a file name contains `query` (case-insensitive).
+    /// Text or a property value contains `query` (case-insensitive).
     pub fn matches(&self, query: &str) -> bool {
         let query = query.to_lowercase();
         query.is_empty()
             || std::iter::once(&self.text)
                 .chain(self.props.iter().map(|p| &p.value))
-                .chain(self.files.iter().map(|f| &f.name))
                 .any(|s| s.to_lowercase().contains(&query))
-    }
-
-    /// Nothing worth keeping: no text, tags, properties or files.
-    pub fn is_blank(&self) -> bool {
-        self.text.trim().is_empty()
-            && self.tags.is_empty()
-            && self.props.is_empty()
-            && self.files.is_empty()
-    }
-
-    /// Stored file named `name` (not a linked one).
-    pub fn stored(&self, name: &str) -> Option<usize> {
-        self.files
-            .iter()
-            .position(|f| !f.linked() && f.name == name)
     }
 }
 
@@ -173,14 +149,6 @@ fn plain(line: &str) -> String {
     strip_marker(line).trim().replace(['*', '`'], "")
 }
 
-/// `name`, made unique among the note's stored files and anything already in its folder.
-fn unique_stored(note: &Note, name: &str) -> String {
-    files::unique_name(name, |candidate| {
-        note.stored(candidate).is_some()
-            || storage::path(&format!("{}/{candidate}", files::dir(note.id))).exists()
-    })
-}
-
 #[derive(Default, Serialize, Deserialize)]
 struct NoteData {
     #[serde(default)]
@@ -214,6 +182,11 @@ impl NoteStore {
         storage::path("notes")
     }
 
+    /// Where files added to note `id` are copied, relative to [`Self::dir`].
+    pub fn files_subdir(id: NoteId) -> String {
+        id.to_string()
+    }
+
     /// Most recently edited first.
     pub fn notes(&self) -> Vec<Note> {
         let mut notes = self.data.notes.clone();
@@ -237,7 +210,6 @@ impl NoteStore {
             text: String::new(),
             tags: Vec::new(),
             props: Vec::new(),
-            files: Vec::new(),
         });
         self.commit(cx);
         id
@@ -307,153 +279,12 @@ impl NoteStore {
         });
     }
 
-    /// Copies files into the note's folder, or (`link`) references them where they are.
-    pub fn attach(&mut self, id: NoteId, paths: &[PathBuf], link: bool, cx: &mut Context<Self>) {
-        let mut errors = Vec::new();
-        self.edit_meta(id, cx, |n| {
-            for path in paths {
-                let name = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .map(files::clean_name)
-                    .unwrap_or_else(|| "file".into());
-                let path_str = path.to_string_lossy().to_string();
-                if link {
-                    if !n.files.iter().any(|f| f.path.as_deref() == Some(&path_str)) {
-                        n.files.push(Attachment {
-                            name,
-                            path: Some(path_str),
-                            added_at: Utc::now(),
-                        });
-                    }
-                    continue;
-                }
-                let name = unique_stored(n, &name);
-                let file = Attachment {
-                    name,
-                    path: None,
-                    added_at: Utc::now(),
-                };
-                match storage::copy_in(path, &file.rel(id).unwrap_or_default()) {
-                    Ok(()) => n.files.push(file),
-                    Err(err) => errors.push(format!("{err:#}")),
-                }
-            }
-        });
-        if !errors.is_empty() {
-            self.save_error = Some(format!("Couldn't attach: {}", errors.join("; ")).into());
-            cx.notify();
-        }
-    }
-
-    /// Makes an empty text file in the note's folder; returns its name.
-    pub fn new_text_file(&mut self, id: NoteId, cx: &mut Context<Self>) -> Option<String> {
-        let mut created = None;
-        let mut error = None;
-        self.edit_meta(id, cx, |n| {
-            let file = Attachment {
-                name: unique_stored(n, "untitled.txt"),
-                path: None,
-                added_at: Utc::now(),
-            };
-            match storage::save_bytes(&file.rel(id).unwrap_or_default(), b"") {
-                Ok(()) => {
-                    created = Some(file.name.clone());
-                    n.files.push(file);
-                }
-                Err(err) => error = Some(format!("Couldn't create file: {err:#}")),
-            }
-        });
-        if let Some(err) = error {
-            self.save_error = Some(err.into());
-            cx.notify();
-        }
-        created
-    }
-
-    /// Saves a stored file's content (the in-app text editor).
-    pub fn write_file(&mut self, id: NoteId, name: &str, text: &str, cx: &mut Context<Self>) {
-        let Some(rel) = self
-            .note(id)
-            .and_then(|n| n.files.get(n.stored(name)?))
-            .and_then(|f| f.rel(id))
-        else {
-            return;
-        };
-        self.save_error = storage::save_bytes(&rel, text.as_bytes())
-            .err()
-            .map(|err| format!("Couldn't save {name}: {err:#}").into());
-        if let Some(note) = self.note_mut(id) {
-            note.updated_at = Utc::now();
-        }
-        self.commit(cx);
-    }
-
-    /// Renames a stored file on disk and fixes links to it in the note. Returns the name it got
-    /// (cleaned and made unique), or `None` if nothing changed.
-    pub fn rename_file(
-        &mut self,
-        id: NoteId,
-        name: &str,
-        new_name: &str,
-        cx: &mut Context<Self>,
-    ) -> Option<String> {
-        let note = self.note(id)?;
-        let ix = note.stored(name)?;
-        let wanted = files::clean_name(new_name);
-        if wanted == name {
-            return None;
-        }
-        // A case-only rename is the same file on macOS: don't number it.
-        let new_name = if wanted.eq_ignore_ascii_case(name) {
-            wanted
-        } else {
-            unique_stored(note, &wanted)
-        };
-        let old = note.files[ix].clone();
-        let new = Attachment {
-            name: new_name.clone(),
-            ..old.clone()
-        };
-        if let Err(err) = storage::rename(&old.rel(id)?, &new.rel(id)?) {
-            self.save_error = Some(format!("Couldn't rename: {err:#}").into());
-            cx.notify();
-            return None;
-        }
-        let (old_target, new_target) = (old.target(id), new.target(id));
-        self.edit_meta(id, cx, |n| n.files[ix] = new);
-        self.edit(
-            id,
-            |text| {
-                text.replace(&format!("](<{old_target}>)"), &format!("](<{new_target}>)"))
-                    .replace(&format!("]({old_target})"), &format!("]({new_target})"))
-            },
-            cx,
-        );
-        Some(new_name)
-    }
-
-    /// Detaches a file; a stored one is deleted from disk.
-    pub fn remove_file(&mut self, id: NoteId, ix: usize, cx: &mut Context<Self>) {
-        let Some(file) = self.note(id).and_then(|n| n.files.get(ix)).cloned() else {
-            return;
-        };
-        if let Some(rel) = file.rel(id)
-            && let Err(err) = storage::remove_file(&rel)
-        {
-            self.save_error = Some(format!("Couldn't delete {}: {err:#}", file.name).into());
-        }
-        self.edit_meta(id, cx, |n| {
-            n.files.remove(ix);
-        });
-    }
-
-    /// Index-only change (tags, properties, file list): saves `notes.json`.
+    /// Index-only change (tags, properties): saves `notes.json`.
     fn edit_meta(&mut self, id: NoteId, cx: &mut Context<Self>, f: impl FnOnce(&mut Note)) {
         if let Some(note) = self.note_mut(id) {
-            let before = (note.tags.clone(), note.props.clone(), note.files.clone());
+            let before = (note.tags.clone(), note.props.clone());
             f(note);
-            if (&note.tags, &note.props, &note.files) != (&before.0, &before.1, &before.2) {
+            if (&note.tags, &note.props) != (&before.0, &before.1) {
                 note.updated_at = Utc::now();
                 self.commit(cx);
             }
@@ -473,7 +304,7 @@ impl NoteStore {
     pub fn delete(&mut self, id: NoteId, cx: &mut Context<Self>) {
         self.data.notes.retain(|n| n.id != id);
         if let Err(err) = storage::save_text(&Note::file(id), "")
-            .and_then(|()| storage::remove_dir(&files::dir(id)))
+            .and_then(|()| storage::remove_dir(&format!("notes/{id}")))
         {
             self.save_error = Some(format!("Couldn't delete note: {err:#}").into());
         }
@@ -517,7 +348,6 @@ mod tests {
             text: text.into(),
             tags: Vec::new(),
             props: Vec::new(),
-            files: Vec::new(),
         }
     }
 

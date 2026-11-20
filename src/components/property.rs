@@ -7,8 +7,6 @@ pub fn property_row(icon: IconName, label: impl Into<SharedString>, theme: &Them
         h_flex()
             .flex_none()
             .w(px(112.))
-            // Fixed height: a row with `items_start` (multi-line value) keeps the label aligned.
-            .h(px(32.))
             .gap_2()
             .text_sm()
             .text_color(theme.muted_foreground)

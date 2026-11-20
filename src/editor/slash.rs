@@ -1,6 +1,7 @@
 //! The `/` block menu: typing `/` in an empty text block opens it with its own search field
 //! (focused; the `/` and what follows move there). It lists block types, then the workspace's
-//! custom blocks (`crate::blocks`); ↑↓ Enter or a click turns the block into one. Esc, a space,
+//! custom blocks (`crate::blocks`), then file links (`files`); ↑↓ Enter or a click turns the
+//! block into one. Esc, a space,
 //! or a query with no match closes it and puts `/query` back into the block; Backspace on an
 //! empty query closes it. Also the built-in block-type list for the handle's "Turn into".
 
@@ -16,6 +17,7 @@ use gpui_kit::{
 
 use super::{
     BlockEditor,
+    files::{FileAction, file_items},
     model::{Kind, Table},
 };
 use crate::blocks::{
@@ -115,10 +117,13 @@ struct SlashItem {
     /// Starting text (a custom block's params at their defaults).
     text: String,
     custom: bool,
+    /// A file item: runs instead of converting the block.
+    file: Option<FileAction>,
 }
 
-/// Rows of the `/` menu matching `query`: built-in types first, then custom blocks.
-fn slash_items(query: &str, cx: &App) -> Vec<SlashItem> {
+/// Rows of the `/` menu matching `query`: built-in types first, then file items (`files`:
+/// the host stores files; linking works anywhere), then custom blocks.
+fn slash_items(query: &str, files: bool, cx: &App) -> Vec<SlashItem> {
     let builtin = block_types()
         .into_iter()
         .filter(|i| i.label.to_lowercase().contains(query) || i.keywords.contains(query))
@@ -132,6 +137,21 @@ fn slash_items(query: &str, cx: &App) -> Vec<SlashItem> {
             },
             kind: i.kind,
             custom: false,
+            file: None,
+        });
+    let file = file_items()
+        .into_iter()
+        .filter(|(action, ..)| files || *action == FileAction::Link)
+        .filter(|(_, label, keywords, _)| {
+            label.to_lowercase().contains(query) || keywords.contains(query)
+        })
+        .map(|(action, label, _, icon)| SlashItem {
+            label: label.into(),
+            icon: Icon::new(icon),
+            kind: Kind::Paragraph,
+            text: String::new(),
+            custom: false,
+            file: Some(action),
         });
     let custom = blocks::types(cx)
         .iter()
@@ -142,8 +162,9 @@ fn slash_items(query: &str, cx: &App) -> Vec<SlashItem> {
             kind: Kind::Code(format!("{FENCE} {}", t.name)),
             text: t.starter(),
             custom: true,
+            file: None,
         });
-    builtin.chain(custom).collect()
+    builtin.chain(file).chain(custom).collect()
 }
 
 impl BlockEditor {
@@ -152,7 +173,7 @@ impl BlockEditor {
     }
 
     fn slash_items(&self, cx: &Context<Self>) -> Vec<SlashItem> {
-        slash_items(&self.slash_query(cx), cx)
+        slash_items(&self.slash_query(cx), self.files.is_some(), cx)
     }
 
     /// After the active block's text changed: a new `/query` opens the menu. Text put back by
@@ -275,7 +296,10 @@ impl BlockEditor {
             return;
         };
         self.slash = None;
-        self.convert(ix, item.kind, item.text, window, cx);
+        match item.file {
+            Some(action) => self.file_action(ix, action, window, cx),
+            None => self.convert(ix, item.kind, item.text, window, cx),
+        }
     }
 
     /// ↑/↓ while the menu is open; false when it isn't.
@@ -294,6 +318,7 @@ impl BlockEditor {
         let items = self.slash_items(cx);
         let selected = self.slash.unwrap_or(0).min(items.len().saturating_sub(1));
         let first_custom = items.iter().position(|i| i.custom);
+        let first_file = items.iter().position(|i| i.file.is_some());
         let empty = items.is_empty();
         let section = |label: &'static str| {
             div()
@@ -325,6 +350,7 @@ impl BlockEditor {
                     }),
                 );
             v_flex()
+                .when(first_file == Some(i), |d| d.child(section("Files")))
                 .when(first_custom == Some(i), |d| d.child(section("Custom")))
                 .child(row)
         });
