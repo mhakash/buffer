@@ -44,6 +44,11 @@ impl DragScroll {
             )
     }
 
+    /// The area's scroll handle (offset, bounds).
+    pub fn handle(&self) -> ScrollHandle {
+        self.0.borrow().handle.clone()
+    }
+
     /// Window-wide listeners (the pointer may leave the area, or the window, mid-drag).
     fn listen(&self, window: &mut Window) {
         let view = window.current_view();

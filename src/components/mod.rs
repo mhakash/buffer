@@ -11,6 +11,7 @@ mod file_list;
 pub mod fx;
 pub mod lightbox;
 mod markdown;
+mod outline;
 mod property;
 
 pub use assets::Assets;
@@ -21,4 +22,5 @@ pub use file_list::file_list;
 pub use markdown::{
     document_style, markdown_style, markdown_view, open_link, output_view, take_claimed_click,
 };
+pub use outline::Outline;
 pub use property::property_row;

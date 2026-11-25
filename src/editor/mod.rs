@@ -21,6 +21,7 @@
 //! | `files` | file links: `/` upload, link, new text file; files dropped from Finder |
 //! | `block_menu` | the handle's menu |
 //! | `render` | how blocks look |
+//! | `outline` | headings and where they are, for a page's outline |
 
 mod block_menu;
 mod clipboard;
@@ -32,6 +33,7 @@ mod keymap;
 mod keys;
 pub mod model;
 mod ops;
+mod outline;
 mod render;
 mod rich;
 mod selection;
@@ -47,7 +49,7 @@ use gpui_kit::component::{
 use gpui_kit::{
     AnyElement, App, Bounds, Context, Entity, EventEmitter, FocusHandle, Focusable, Modifiers,
     MouseButton, MouseDownEvent, MouseUpEvent, Pixels, PlatformInput, Point, ScrollHandle,
-    Subscription, Window, div, point, prelude::*, px,
+    Subscription, Window, canvas, div, point, prelude::*, px,
 };
 
 use block_menu::BlockMenu;
@@ -58,6 +60,7 @@ use selection::{Press, Selection};
 use slash::kind_label;
 
 pub use keymap::init;
+pub use outline::Heading;
 
 pub enum BlockEditorEvent {
     /// The body changed; the Markdown to save.
@@ -101,6 +104,8 @@ pub struct BlockEditor {
     history: History,
     /// Each row's bounds from the last frame (pointer → block).
     row_bounds: Rc<RefCell<Vec<Bounds<Pixels>>>>,
+    /// The editor's top in the same frame (row positions → editor-relative).
+    root_top: Rc<std::cell::Cell<Pixels>>,
     /// Holds focus while blocks are selected.
     focus_handle: FocusHandle,
     /// Folder relative image paths resolve against (the note's or task's).
@@ -155,6 +160,7 @@ impl BlockEditor {
             block_menu: None,
             history: History::default(),
             row_bounds: Rc::default(),
+            root_top: Rc::default(),
             focus_handle,
             dir: PathBuf::new(),
             compact: false,
@@ -473,6 +479,13 @@ impl Render for BlockEditor {
             .on_drop(cx.listener(Self::on_drop_blocks))
             .on_drag_move(cx.listener(Self::on_drag_files))
             .on_drop(cx.listener(Self::on_drop_files))
+            .child({
+                let top = self.root_top.clone();
+                canvas(move |b, _, _| top.set(b.top()), |_, _, _, _| {})
+                    .absolute()
+                    .top_0()
+                    .size_0()
+            })
             .children(rows)
             .child(
                 div()

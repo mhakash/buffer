@@ -113,7 +113,7 @@ side panel → closed. The folder button reveals the task's files in Finder.
 |---|---|
 | Title | Done checkbox + inline-editable title; "Edited …" time in the toolbar |
 | Properties | Status (To do / Follow up / Done) and priority as menus, categories (+ menu toggles any number), due date (overdue shows red), created |
-| Notes | Same block editor and file list as the Notes page (see Block editor, Files), compact in the side panel; Markdown / Rich text toggles the source |
+| Notes | Same block editor, outline and file list as the Notes page (see Notes, Block editor, Files), compact in the side panel; Markdown / Rich text toggles the source |
 
 Subtasks, links and the work log are part of the notes: a checklist (`/todo`), pasted links and
 log lines (`/log`), available in any note. Tasks from before 0.27 had them as separate lists; on
@@ -146,6 +146,10 @@ confirmation).
 Properties under the title: Created, Edited, Tags (the task categories; + toggles), and any
 number of your own text properties ("Add a property" → name, Enter → value). Click a value to
 edit it; URL values get an open button; hover a row to remove it.
+
+A note with headings shows an outline at the document's top right: a dash per heading (longer for
+higher levels), the section being read highlighted. Hover it to list the titles; click one to
+scroll there.
 
 ### Files
 

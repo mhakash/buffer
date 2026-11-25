@@ -23,7 +23,7 @@ use gpui_kit::{
 
 use super::tasks::{due_label, priority_menu, status_color, status_menu};
 use crate::{
-    components::{DragScroll, category_tag, file_list, icon_button, property_row},
+    components::{DragScroll, Outline, category_tag, file_list, icon_button, property_row},
     editor::{BlockEditor, BlockEditorEvent},
     tasks::{Id, Status, Task, TaskStore},
 };
@@ -70,6 +70,8 @@ pub struct TaskDetail {
     due: Entity<DatePickerState>,
     /// The body follows a selection dragged past its edges.
     drag_scroll: DragScroll,
+    /// Heading outline at the top right of the body.
+    outline: Outline,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -137,6 +139,7 @@ impl TaskDetail {
             notes,
             due,
             drag_scroll: DragScroll::default(),
+            outline: Outline::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -500,7 +503,9 @@ impl TaskDetail {
                 .into_any_element()
         } else {
             // Same editor as the Notes page.
-            self.blocks.clone().into_any_element()
+            self.outline
+                .wrap_editor(self.blocks.clone())
+                .into_any_element()
         };
 
         Self::section(IconName::NotebookPen, "Notes", None, theme)
@@ -548,9 +553,24 @@ impl Render for TaskDetail {
         let _ = window;
         let full = self.full_page;
         let gutter = self.gutter();
+        let outline = if self.source_notes {
+            None
+        } else {
+            self.outline.render(
+                "task-outline",
+                task.title.clone().into(),
+                self.blocks.read(cx).headings(),
+                &self.drag_scroll.handle(),
+                &theme,
+            )
+        };
 
         let content = v_flex()
+            .relative()
             .w_full()
+            // The side panel's padding is too narrow for the outline beside the text.
+            .when(outline.is_some() && !full, |this| this.pr(px(20.)))
+            .child(self.outline.probe_content())
             .when(full, |this| this.max_w(px(PAGE_MAX_W)).mx_auto())
             .child(self.render_title(&task, &theme, cx))
             .child(self.render_properties(&task, &theme, cx))
@@ -583,15 +603,16 @@ impl Render for TaskDetail {
             .on_action(cx.listener(|this, _: &Escape, _, cx| this.escape(cx)))
             .child(self.render_toolbar(&task, &theme, cx))
             .child(
-                self.drag_scroll
-                    .attach(
-                        div()
-                            .id("detail-body")
-                            .flex_1()
-                            .min_h_0()
-                            .overflow_y_scroll(),
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(
+                        self.drag_scroll
+                            .attach(div().id("detail-body").size_full().overflow_y_scroll())
+                            .child(content),
                     )
-                    .child(content),
+                    .children(outline),
             )
             // Drag the left edge to resize the side panel.
             .when(!full, |this| {

@@ -19,7 +19,8 @@ use gpui_kit::{
 use super::task_detail::when;
 use crate::{
     components::{
-        DragScroll, category_tag, confirm::confirm_delete, file_list, icon_button, property_row,
+        DragScroll, Outline, category_tag, confirm::confirm_delete, file_list, icon_button,
+        property_row,
     },
     editor::{BlockEditor, BlockEditorEvent},
     notes::{Note, NoteId, NoteStore},
@@ -52,6 +53,8 @@ pub struct NotesPage {
     new_prop: Entity<InputState>,
     /// The document follows a selection dragged past its edges.
     drag_scroll: DragScroll,
+    /// Heading outline at the document's top right.
+    outline: Outline,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -181,6 +184,7 @@ impl NotesPage {
             search,
             focus_handle: cx.focus_handle(),
             drag_scroll: DragScroll::default(),
+            outline: Outline::default(),
             _subscriptions: subscriptions,
         };
         this.ensure_selection(window, cx);
@@ -739,7 +743,28 @@ impl NotesPage {
                 )
                 .into_any_element();
         }
-        self.blocks.clone().into_any_element()
+        self.outline
+            .wrap_editor(self.blocks.clone())
+            .into_any_element()
+    }
+
+    fn render_outline(&self, theme: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.source {
+            return None;
+        }
+        let title = self.title.read(cx).value().trim().to_string();
+        let title = if title.is_empty() {
+            "Untitled".to_string()
+        } else {
+            title
+        };
+        self.outline.render(
+            "note-outline",
+            title.into(),
+            self.blocks.read(cx).headings(),
+            &self.drag_scroll.handle(),
+            theme,
+        )
     }
 
     fn render_empty(&self, theme: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
@@ -801,44 +826,45 @@ impl Render for NotesPage {
                 this.child(div().px_4().text_sm().text_color(theme.danger).child(err))
             })
             .child(match &current {
-                Some(note) => self
-                    .drag_scroll
-                    .attach(
-                        div()
-                            .id("note-scroll")
-                            .flex_1()
-                            .min_h_0()
-                            .overflow_y_scroll(),
-                    )
+                Some(note) => div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
                     .child(
-                        v_flex()
-                            .w_full()
-                            .max_w(px(doc_w))
-                            .mx_auto()
-                            .px_12()
-                            .pt_6()
-                            .pb_16()
-                            .gap_4()
+                        self.drag_scroll
+                            .attach(div().id("note-scroll").size_full().overflow_y_scroll())
                             .child(
-                                // Kit inputs pin their own height/text size; override for a
-                                // document title flush with the body.
-                                Input::new(&self.title)
-                                    .appearance(false)
-                                    .px_0()
-                                    .h(px(46.))
-                                    .text_size(px(32.))
-                                    .line_height(px(42.))
-                                    .font_weight(FontWeight::BOLD),
-                            )
-                            .child(self.render_properties(note, &theme, cx))
-                            .child(self.render_body())
-                            .children(file_list(
-                                "note-file",
-                                note.split().content,
-                                &NoteStore::dir(),
-                                &theme,
-                            )),
+                                v_flex()
+                                    .w_full()
+                                    .max_w(px(doc_w))
+                                    .mx_auto()
+                                    .px_12()
+                                    .pt_6()
+                                    .pb_16()
+                                    .gap_4()
+                                    .child(self.outline.probe_content())
+                                    .child(
+                                        // Kit inputs pin their own height/text size; override for a
+                                        // document title flush with the body.
+                                        Input::new(&self.title)
+                                            .appearance(false)
+                                            .px_0()
+                                            .h(px(46.))
+                                            .text_size(px(32.))
+                                            .line_height(px(42.))
+                                            .font_weight(FontWeight::BOLD),
+                                    )
+                                    .child(self.render_properties(note, &theme, cx))
+                                    .child(self.render_body())
+                                    .children(file_list(
+                                        "note-file",
+                                        note.split().content,
+                                        &NoteStore::dir(),
+                                        &theme,
+                                    )),
+                            ),
                     )
+                    .children(self.render_outline(&theme, cx))
                     .into_any_element(),
                 None => v_flex()
                     .flex_1()
