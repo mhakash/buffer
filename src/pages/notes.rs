@@ -18,7 +18,9 @@ use gpui_kit::{
 
 use super::task_detail::when;
 use crate::{
-    components::{category_tag, confirm::confirm_delete, file_list, icon_button, property_row},
+    components::{
+        DragScroll, category_tag, confirm::confirm_delete, file_list, icon_button, property_row,
+    },
     editor::{BlockEditor, BlockEditorEvent},
     notes::{Note, NoteId, NoteStore},
     tasks::{TaskStore, is_url},
@@ -48,6 +50,8 @@ pub struct NotesPage {
     /// "Add a property" name field is open.
     adding_prop: bool,
     new_prop: Entity<InputState>,
+    /// The document follows a selection dragged past its edges.
+    drag_scroll: DragScroll,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -176,6 +180,7 @@ impl NotesPage {
             editor,
             search,
             focus_handle: cx.focus_handle(),
+            drag_scroll: DragScroll::default(),
             _subscriptions: subscriptions,
         };
         this.ensure_selection(window, cx);
@@ -796,11 +801,15 @@ impl Render for NotesPage {
                 this.child(div().px_4().text_sm().text_color(theme.danger).child(err))
             })
             .child(match &current {
-                Some(note) => div()
-                    .id("note-scroll")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
+                Some(note) => self
+                    .drag_scroll
+                    .attach(
+                        div()
+                            .id("note-scroll")
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll(),
+                    )
                     .child(
                         v_flex()
                             .w_full()

@@ -23,7 +23,7 @@ use gpui_kit::{
 
 use super::tasks::{due_label, priority_menu, status_color, status_menu};
 use crate::{
-    components::{category_tag, file_list, icon_button, property_row},
+    components::{DragScroll, category_tag, file_list, icon_button, property_row},
     editor::{BlockEditor, BlockEditorEvent},
     tasks::{Id, Status, Task, TaskStore},
 };
@@ -68,6 +68,8 @@ pub struct TaskDetail {
     title: Entity<InputState>,
     notes: Entity<TextareaState>,
     due: Entity<DatePickerState>,
+    /// The body follows a selection dragged past its edges.
+    drag_scroll: DragScroll,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -134,6 +136,7 @@ impl TaskDetail {
             title,
             notes,
             due,
+            drag_scroll: DragScroll::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -580,11 +583,14 @@ impl Render for TaskDetail {
             .on_action(cx.listener(|this, _: &Escape, _, cx| this.escape(cx)))
             .child(self.render_toolbar(&task, &theme, cx))
             .child(
-                div()
-                    .id("detail-body")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
+                self.drag_scroll
+                    .attach(
+                        div()
+                            .id("detail-body")
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll(),
+                    )
                     .child(content),
             )
             // Drag the left edge to resize the side panel.
