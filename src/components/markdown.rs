@@ -113,7 +113,13 @@ fn resolve_image(uri: &SharedUri, dir: &Path) -> ImageSource {
 /// URLs open in the browser (or their app); a file path (relative to the note's folder,
 /// `~/`, absolute, `file://`) opens through [`super::file_editor::open_path`]. The click is
 /// claimed so an editor around the text doesn't also start editing the block.
-fn open_link(url: &str, position: Point<Pixels>, dir: &Path, window: &mut Window, cx: &mut App) {
+pub fn open_link(
+    url: &str,
+    position: Point<Pixels>,
+    dir: &Path,
+    window: &mut Window,
+    cx: &mut App,
+) {
     claim_click(position);
     let target = crate::files::percent_decode(url);
     if crate::files::is_local(&target) {

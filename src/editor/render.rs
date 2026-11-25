@@ -7,9 +7,7 @@ use gpui_kit::component::{
     Icon, Sizable, Size, Theme,
     button::{Button, ButtonRounded, ButtonVariants},
     checkbox::Checkbox,
-    h_flex,
-    input::Textarea,
-    v_flex,
+    h_flex, v_flex,
 };
 use gpui_kit::{
     AnyElement, App, ClickEvent, Context, FontWeight, Hsla, MouseButton, MouseDownEvent,
@@ -19,6 +17,7 @@ use gpui_kit::{
 use super::{
     BlockEditor,
     model::{Kind, inline_markdown},
+    rich::{RichText, rich_text_view},
 };
 use crate::blocks::{self, model::ParamKind};
 use crate::components::{document_style, markdown_style, markdown_view, take_claimed_click};
@@ -146,21 +145,25 @@ impl BlockEditor {
         let active = self.active == Some(ix);
         row.child(content)
             .child(self.render_handles(ix, indent_x, handle_top, theme, cx))
-            .when(!active && *kind != Kind::Divider, |row| {
-                row.on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-                    // A click in a custom block's output selects text or follows a link; a press
-                    // that selected text leaves it selected for copying.
-                    if this.drag_selecting
-                        || take_claimed_click(event.position())
-                        || TextSelection::has_selection(window, cx)
-                    {
-                        return;
-                    }
-                    if let Some(ix) = this.index_of(id) {
-                        this.click_block(ix, event.position(), window, cx);
-                    }
-                }))
-            })
+            // Text blocks open on press (`render_body`); code, custom blocks and tables on click.
+            .when(
+                !active && !kind.is_text() && *kind != Kind::Divider,
+                |row| {
+                    row.on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                        // A click in a custom block's output selects text or follows a link; a press
+                        // that selected text leaves it selected for copying.
+                        if this.drag_selecting
+                            || take_claimed_click(event.position())
+                            || TextSelection::has_selection(window, cx)
+                        {
+                            return;
+                        }
+                        if let Some(ix) = this.index_of(id) {
+                            this.click_block(ix, event.position(), window, cx);
+                        }
+                    }))
+                },
+            )
             .into_any_element()
     }
 
@@ -193,16 +196,14 @@ impl BlockEditor {
                         .when(code_like, |d| {
                             d.px_3().py_2().rounded_xl().bg(theme.secondary)
                         })
-                        .child(
-                            Textarea::new(&self.input)
-                                .appearance(false)
-                                .with_size(Size::XSmall)
-                                .ml(px(-4.))
-                                .text_size(px(size))
-                                .line_height(px(line_h))
-                                .font_weight(weight)
-                                .when(code_like, |t| t.font_family(theme.mono_font_family.clone())),
-                        ),
+                        .text_size(px(size))
+                        .line_height(px(line_h))
+                        .font_weight(weight)
+                        .when(code_like, |d| d.font_family(theme.mono_font_family.clone()))
+                        .when(matches!(kind, Kind::Todo(true)), |d| {
+                            d.text_color(theme.muted_foreground).line_through()
+                        })
+                        .child(RichText::new(&self.input)),
                 )
                 .children(block_hint(kind, theme, cx))
                 .when(self.slash.is_some(), |this| {
@@ -210,6 +211,17 @@ impl BlockEditor {
                 })
                 .into_any_element();
         }
+        // Opens on press, so the drag that may follow selects text in place. Taken before the
+        // rendered text sees it: that would start its own selection and take focus.
+        let on_press = cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+            if event.button != MouseButton::Left || this.block_menu.is_some() {
+                return;
+            }
+            if let Some(ix) = this.index_of(id) {
+                cx.stop_propagation();
+                this.press_block(ix, event.position, window, cx);
+            }
+        });
         if code_like {
             return div()
                 .flex_1()
@@ -226,27 +238,39 @@ impl BlockEditor {
         }
         if block.text.trim().is_empty() {
             return div()
+                .id(("blk-body", id))
                 .flex_1()
                 .h(px(line_h))
                 .cursor_text()
+                .capture_any_mouse_down(on_press)
                 .into_any_element();
         }
         div()
+            .id(("blk-body", id))
             .flex_1()
             .min_w_0()
             .cursor_text()
+            .capture_any_mouse_down(on_press)
             .text_size(px(size))
             .line_height(px(line_h))
             .font_weight(weight)
             .when(matches!(kind, Kind::Todo(true)), |d| {
                 d.text_color(theme.muted_foreground).line_through()
             })
-            .child(markdown_view(
-                ("blk-md", id),
-                inline_markdown(&block.text),
-                style().paragraph_gap(rems(0.)),
-                self.dir.clone(),
-            ))
+            // Drawn like the block being edited, so a press doesn't restyle it; images still
+            // need the Markdown renderer.
+            .map(|d| {
+                if block.text.contains("![") {
+                    d.child(markdown_view(
+                        ("blk-md", id),
+                        inline_markdown(&block.text),
+                        style().paragraph_gap(rems(0.)),
+                        self.dir.clone(),
+                    ))
+                } else {
+                    d.child(rich_text_view(&block.text, theme))
+                }
+            })
             .into_any_element()
     }
 

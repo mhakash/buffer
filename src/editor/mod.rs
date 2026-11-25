@@ -33,6 +33,7 @@ mod keys;
 pub mod model;
 mod ops;
 mod render;
+mod rich;
 mod selection;
 mod slash;
 mod table;
@@ -41,7 +42,7 @@ use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
 use gpui_kit::component::{
     ActiveTheme,
-    input::{InputEvent, InputState, TextareaState},
+    input::{InputEvent, InputState},
 };
 use gpui_kit::{
     AnyElement, App, Bounds, Context, Entity, EventEmitter, FocusHandle, Focusable, Modifiers,
@@ -52,6 +53,7 @@ use gpui_kit::{
 use block_menu::BlockMenu;
 use history::History;
 use model::{Doc, Kind, Table};
+use rich::RichTextState;
 use selection::{Press, Selection};
 use slash::kind_label;
 
@@ -77,7 +79,7 @@ pub struct BlockEditor {
     active: Option<usize>,
     /// Text was typed since the active block opened (⌘Z goes to its textarea first).
     typed: bool,
-    input: Entity<TextareaState>,
+    input: Entity<RichTextState>,
     /// Highlighted row of the open `/` menu.
     slash: Option<usize>,
     slash_scroll: ScrollHandle,
@@ -120,11 +122,13 @@ impl Focusable for BlockEditor {
 
 impl BlockEditor {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(|cx| TextareaState::new(window, cx).auto_grow(1, 5000));
+        let input = cx.new(|cx| RichTextState::new(window, cx));
         let slash_input = cx.new(|cx| InputState::new(window, cx).placeholder("Search blocks"));
         let focus_handle = cx.focus_handle();
         let subscriptions = vec![
             cx.subscribe_in(&input, window, Self::on_input_event),
+            // Caret and selection changes repaint the block (the input isn't a view).
+            cx.observe(&input, |_, _, cx| cx.notify()),
             cx.subscribe_in(&slash_input, window, Self::on_slash_input_event),
             // Clicking away clears the selection (not while its menu has focus).
             cx.on_blur(&focus_handle, window, |this, _, cx| {
@@ -316,7 +320,11 @@ impl BlockEditor {
             Caret::At(n) => n.min(text.len()),
         };
         let placeholder = placeholder(&block.kind);
+        let plain = !block.kind.is_text() && block.kind != Kind::Table;
+        let dir = self.dir.clone();
         self.input.update(cx, |input, cx| {
+            input.set_link_dir(dir);
+            input.set_plain(plain, cx);
             input.set_value(text, window, cx);
             input.set_placeholder(placeholder, window, cx);
             input.set_selected_range(offset..offset, cx);
@@ -349,8 +357,24 @@ impl BlockEditor {
         }
     }
 
-    /// A click on a rendered block: edit it and put the caret where the click was, by
-    /// replaying the click into the textarea once it's laid out in the block's place.
+    /// A press on a rendered text block, like Notion: edit it at once and hand the press to
+    /// the text once it's laid out in the block's place, so the caret lands under the pointer
+    /// and dragging on selects text (the release comes from the real mouse).
+    fn press_block(
+        &mut self,
+        ix: usize,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        gpui_kit::base::TextSelection::clear(window, cx);
+        let stale = self.input.read(cx).text_bounds();
+        self.activate(ix, Caret::End, window, cx);
+        replay_click(self.input.clone(), stale, position, false, 5, window);
+    }
+
+    /// A click on a rendered code or custom block: edit it and put the caret where the click
+    /// was, by replaying the click into the text once it's laid out in the block's place.
     fn click_block(
         &mut self,
         ix: usize,
@@ -361,7 +385,7 @@ impl BlockEditor {
         // The input is shared: its last layout is the previous block's until it re-lays out.
         let stale = self.input.read(cx).text_bounds();
         self.activate(ix, Caret::End, window, cx);
-        replay_click(self.input.clone(), stale, position, 5, window);
+        replay_click(self.input.clone(), stale, position, true, 5, window);
     }
 
     /// Click under the last block: continue writing there.
@@ -384,7 +408,7 @@ impl BlockEditor {
 
     fn on_input_event(
         &mut self,
-        _: &Entity<TextareaState>,
+        _: &Entity<RichTextState>,
         event: &InputEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -481,10 +505,12 @@ fn placeholder(kind: &Kind) -> &'static str {
 /// Click into the active textarea at `position` once it has been laid out in the block's
 /// place (its text bounds differ from `stale`), so the caret lands where the rendered text
 /// was clicked. The click is clamped into the textarea so it can't hit another block.
+/// Without `release` only the press is replayed (the button is still down).
 fn replay_click(
-    input: Entity<TextareaState>,
+    input: Entity<RichTextState>,
     stale: Option<Bounds<Pixels>>,
     position: Point<Pixels>,
+    release: bool,
     tries: u8,
     window: &mut Window,
 ) {
@@ -492,7 +518,7 @@ fn replay_click(
     window.on_next_frame(move |window, cx| {
         let Some(b) = input.read(cx).text_bounds().filter(|b| Some(*b) != stale) else {
             if tries > 0 {
-                replay_click(input, stale, position, tries - 1, window);
+                replay_click(input, stale, position, release, tries - 1, window);
             }
             return;
         };
@@ -511,6 +537,9 @@ fn replay_click(
             }),
             cx,
         );
+        if !release {
+            return;
+        }
         window.dispatch_event(
             PlatformInput::MouseUp(MouseUpEvent {
                 button: MouseButton::Left,

@@ -62,6 +62,8 @@ API source of truth: `~/.cargo/registry/src/*/{gpui-pre-0.3.12,gpui-base-0.9.1,g
 | Synthetic Esc (CGEvent) ignored in UI checks | macOS routes Esc through the input context; set the event's unicode string to `\u{1b}` |
 | Enter in a single-line `Input` inside a kit dialog closes the dialog (the input propagates `Enter` → `Confirm`) | `.on_action(\|_: &Enter, …\|)` on a wrapper and don't propagate (see `components/file_editor.rs`) |
 | Global shortcuts | bind with `secondary-` (cmd on mac, ctrl elsewhere), `None` context; handle on `Workspace` root via `.on_action` |
+| `cx.notify()` on a non-view entity (e.g. `RichTextState`) doesn't repaint the view that draws it | the view `cx.observe(&entity, \|_, _, cx\| cx.notify())` |
+| Press on rendered Markdown (`markdown_view`) also starts its own selection and takes focus | take the press with `capture_any_mouse_down` + `cx.stop_propagation()` (see `render_body`) |
 | Focus after page switch | `Workspace::navigate` must focus something rendered (composer or workspace handle) or actions stop dispatching |
 
 ## Verifying UI
@@ -78,7 +80,7 @@ Screen recording + Accessibility are granted to the host app, so verify visual c
 | `frames IN.mov DIR t…` / `sheet OUT.png COLS imgs…` | pull frames from a recording / contact sheet |
 
 1. Launch: `(BUFFER_DATA_DIR=<scratch>/wd perl -e 'alarm 600; exec @ARGV' ./target/debug/buffer &)` — the alarm guarantees it quits.
-2. The user's installed Buffer opens at the **same position**; `move` the test window clear of it (activation alone won't raise an unbundled binary) and confirm with `top` before clicking — never click into the real app. Restore any window you moved.
+2. The user's installed Buffer opens at the **same position**; `move` the test window clear of it (activation alone won't raise an unbundled binary) and confirm with `top` before clicking — never click into the real app. `make dev` (bacon) may also be running a `buffer` that relaunches on every build: pick your window by the PID you launched (`$!`, perl `exec` keeps it), never by owner name, and check `list`'s first row is that PID before each click/key. Restore any window you moved.
 3. Click the title bar to activate (hover states need an active window), then drive with `mouse`.
 Screenshots are in pixels (2× on Retina): global point = window origin + pixel / 2.
 4. Stills: `screencapture -x -o -l<window id> out.png` (works while occluded). Animations: `screencapture -x -v -V 3 -R x,y,w,h rec.mov` in the background, act, then `frames` + `sheet` (stills are too slow to catch <300 ms motion).

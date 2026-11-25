@@ -174,7 +174,10 @@ Deleting a link leaves the copied file on disk; deleting a note deletes its fold
 
 Notes and task notes share one editor. Every paragraph, heading, list item, to-do, quote, code
 fence, table and divider is a block. Blocks show
-formatted; click one to edit it (its inline Markdown — `**bold**`, links — shows while editing).
+formatted; click one to edit it in place, formatting and all: Markdown markers stay hidden (the link
+address shows while the caret is in a link; Enter there finishes it). Pressing on text puts the caret
+there and dragging selects it, like Notion; ⌘C copies plain text (formatting kept when pasted back
+into a note). A click on a link opens it (⌘-click while editing that block).
 Untouched blocks are saved byte for byte, so the file stays yours.
 
 | Input | Effect |

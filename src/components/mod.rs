@@ -19,6 +19,6 @@ pub use chip::{category_tag, chip, icon_button};
 pub use drag_scroll::DragScroll;
 pub use file_list::file_list;
 pub use markdown::{
-    document_style, markdown_style, markdown_view, output_view, take_claimed_click,
+    document_style, markdown_style, markdown_view, open_link, output_view, take_claimed_click,
 };
 pub use property::property_row;

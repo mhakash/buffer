@@ -116,10 +116,13 @@ impl BlockEditor {
     // ---- mouse ----
 
     /// Block under a window y: rows above the first map to it, below the last to the last.
+    /// A row's box can reach into the next one, so the lower row wins where they overlap.
     pub(super) fn row_at(&self, y: Pixels) -> Option<usize> {
         let rows = self.row_bounds.borrow();
-        let last = rows.len().checked_sub(1)?;
-        Some(rows.iter().position(|b| y < b.bottom()).unwrap_or(last))
+        if rows.is_empty() {
+            return None;
+        }
+        Some(rows.iter().rposition(|b| b.top() <= y).unwrap_or(0))
     }
 
     /// Captured before the blocks see it: shift-click extends, anything else may start a

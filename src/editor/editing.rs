@@ -2,7 +2,7 @@
 //! across block boundaries, arrows between blocks, list nesting, inline marks. Handlers call
 //! `cx.stop_propagation()` when they take a key; otherwise the textarea gets it.
 
-use gpui_kit::component::input::{BufferPoint, Enter};
+use gpui_kit::component::input::Enter;
 use gpui_kit::{Context, Window};
 
 use super::{
@@ -101,6 +101,10 @@ impl BlockEditor {
             self.apply_slash(sel, window, cx);
             return;
         }
+        if self.input.update(cx, |input, cx| input.finish_link(cx)) {
+            cx.stop_propagation();
+            return;
+        }
         let block = &self.doc.blocks[ix];
         let (kind, indent) = (block.kind.clone(), block.indent);
         if kind == Kind::Table {
@@ -126,8 +130,8 @@ impl BlockEditor {
         cx.stop_propagation();
         self.checkpoint();
         let text = self.text(cx);
-        let range = self.input.read(cx).selected_range();
-        let (before, after) = (&text[..range.start], &text[range.end..]);
+        let (before, after) = self.input.read(cx).split_at_caret();
+        let (before, after) = (before.as_str(), after.as_str());
 
         // Enter on an empty item leaves the list (outdents first), like Notion.
         if text.is_empty() && (kind.is_list() || kind == Kind::Quote) {
@@ -179,8 +183,7 @@ impl BlockEditor {
         if self.doc.blocks[ix].kind == Kind::Table {
             return; // only ever edits the cell
         }
-        let range = self.input.read(cx).selected_range();
-        if !range.is_empty() || range.start > 0 {
+        if !self.input.read(cx).at_start() {
             return;
         }
         let text = self.text(cx);
@@ -229,10 +232,8 @@ impl BlockEditor {
             return;
         }
         let text = self.text(cx);
-        let range = self.input.read(cx).selected_range();
         let joinable = |k: &Kind| k.is_text();
-        if !range.is_empty()
-            || range.start < text.len()
+        if !self.input.read(cx).at_end()
             || !joinable(&self.doc.blocks[ix].kind)
             || !self
                 .doc
@@ -250,15 +251,9 @@ impl BlockEditor {
         self.changed(cx);
     }
 
-    /// (display row of the caret, display rows) of the active textarea.
+    /// (visual row of the caret, rows) of the block being edited.
     fn caret_row(&self, cx: &Context<Self>) -> (usize, usize) {
-        let input = self.input.read(cx);
-        let pos = input.cursor_position();
-        let map = input.display_map();
-        let row = map
-            .buffer_pos_to_display_pos(BufferPoint::new(pos.line as usize, pos.character as usize))
-            .row;
-        (row, map.display_row_count().max(1))
+        self.input.read(cx).caret_row()
     }
 
     fn on_first_row(&self, cx: &Context<Self>) -> bool {
@@ -336,13 +331,12 @@ impl BlockEditor {
         if self.slash.is_some() {
             return;
         }
-        let range = self.input.read(cx).selected_range();
-        let at_edge = range.is_empty()
-            && if step < 0 {
-                range.start == 0
-            } else {
-                range.start >= self.text(cx).len()
-            };
+        let input = self.input.read(cx);
+        let at_edge = if step < 0 {
+            input.at_start()
+        } else {
+            input.at_end()
+        };
         if at_edge && self.doc.blocks[ix].kind == Kind::Table {
             cx.stop_propagation();
             self.cell_step(ix, step, false, window, cx);
@@ -377,9 +371,7 @@ impl BlockEditor {
         if self.slash.is_some() {
             return;
         }
-        let range = self.input.read(cx).selected_range();
-        let len = self.text(cx).len();
-        if range.start == 0 && range.end == len {
+        if self.input.read(cx).all_selected() {
             cx.stop_propagation();
             self.select_all(window, cx);
         }

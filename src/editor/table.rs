@@ -3,7 +3,7 @@
 //! Enter move between rows (Enter past the last adds one), ⌘Enter leaves the table. Rows and
 //! columns are added from the hover bars and inserted / deleted from a cell's right-click menu.
 
-use gpui_kit::component::{Icon, Sizable, Size, Theme, h_flex, input::Textarea, v_flex};
+use gpui_kit::component::{Icon, Sizable, Theme, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, ClickEvent, Context, FontWeight, MouseButton, MouseDownEvent, Pixels, Point,
     SharedString, Window, assets::IconName, div, prelude::*, px, rems,
@@ -13,6 +13,7 @@ use super::{
     BlockEditor, Caret,
     model::{Table, inline_markdown},
     replay_click,
+    rich::{RichText, rich_text_view},
 };
 use crate::components::{document_style, markdown_style, markdown_view};
 
@@ -150,7 +151,7 @@ impl BlockEditor {
         }
         let stale = self.input.read(cx).text_bounds();
         self.activate_cell(ix, cell, Caret::End, window, cx);
-        replay_click(self.input.clone(), stale, position, 5, window);
+        replay_click(self.input.clone(), stale, position, true, 5, window);
     }
 
     pub(super) fn render_table(&self, ix: usize, theme: &Theme, cx: &Context<Self>) -> AnyElement {
@@ -172,16 +173,21 @@ impl BlockEditor {
         let rows = table.rows.iter().enumerate().map(|(r, row)| {
             let cells = row.iter().enumerate().map(|(c, text)| {
                 let body = if active == Some((r, c)) {
-                    Textarea::new(&self.input)
-                        .appearance(false)
-                        .with_size(Size::XSmall)
-                        .ml(px(-4.))
+                    div()
                         .text_size(px(size))
                         .line_height(px(line_h))
-                        .when(r == 0, |t| t.font_weight(FontWeight::SEMIBOLD))
+                        .when(r == 0, |d| d.font_weight(FontWeight::SEMIBOLD))
+                        .child(RichText::new(&self.input))
                         .into_any_element()
                 } else if text.is_empty() {
                     div().h(px(line_h)).into_any_element()
+                } else if !text.contains("![") {
+                    div()
+                        .text_size(px(size))
+                        .line_height(px(line_h))
+                        .when(r == 0, |d| d.font_weight(FontWeight::SEMIBOLD))
+                        .child(rich_text_view(text, theme))
+                        .into_any_element()
                 } else {
                     markdown_view(
                         ("tbl-md", id << 24 | (r as u64) << 12 | c as u64),
