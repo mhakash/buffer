@@ -2,6 +2,7 @@
 //! between them doesn't move the text. Each row reaches left into the gutter (so hovering the
 //! handles keeps them shown) and records its bounds for pointer hit-testing.
 
+use gpui_kit::base::TextSelection;
 use gpui_kit::component::{
     Icon, Sizable, Size, Theme,
     button::{Button, ButtonRounded, ButtonVariants},
@@ -147,8 +148,12 @@ impl BlockEditor {
             .child(self.render_handles(ix, indent_x, handle_top, theme, cx))
             .when(!active && *kind != Kind::Divider, |row| {
                 row.on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-                    // A click in a custom block's output selects text or follows a link.
-                    if this.drag_selecting || take_claimed_click(event.position()) {
+                    // A click in a custom block's output selects text or follows a link; a press
+                    // that selected text leaves it selected for copying.
+                    if this.drag_selecting
+                        || take_claimed_click(event.position())
+                        || TextSelection::has_selection(window, cx)
+                    {
                         return;
                     }
                     if let Some(ix) = this.index_of(id) {
@@ -211,10 +216,12 @@ impl BlockEditor {
                 .min_w_0()
                 .cursor_text()
                 .text_size(px(if compact { 14. } else { 16. }))
-                .child(
-                    markdown_view(("blk-md", id), block.source(), style(), self.dir.clone())
-                        .selectable(false),
-                )
+                .child(markdown_view(
+                    ("blk-md", id),
+                    block.source(),
+                    style(),
+                    self.dir.clone(),
+                ))
                 .into_any_element();
         }
         if block.text.trim().is_empty() {
@@ -234,15 +241,12 @@ impl BlockEditor {
             .when(matches!(kind, Kind::Todo(true)), |d| {
                 d.text_color(theme.muted_foreground).line_through()
             })
-            .child(
-                markdown_view(
-                    ("blk-md", id),
-                    inline_markdown(&block.text),
-                    style().paragraph_gap(rems(0.)),
-                    self.dir.clone(),
-                )
-                .selectable(false),
-            )
+            .child(markdown_view(
+                ("blk-md", id),
+                inline_markdown(&block.text),
+                style().paragraph_gap(rems(0.)),
+                self.dir.clone(),
+            ))
             .into_any_element()
     }
 

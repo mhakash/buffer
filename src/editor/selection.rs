@@ -5,6 +5,7 @@
 
 use std::ops::Range;
 
+use gpui_kit::base::TextSelection;
 use gpui_kit::{Context, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Window};
 
 use super::{BlockEditor, BlockEditorEvent, Caret};
@@ -105,7 +106,8 @@ impl BlockEditor {
     }
 
     /// Esc: drop the selection and hand focus back to the page.
-    pub(super) fn sel_escape(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn sel_escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        TextSelection::clear(window, cx);
         self.selection = None;
         cx.emit(BlockEditorEvent::Exit);
         cx.notify();
@@ -162,6 +164,10 @@ impl BlockEditor {
         };
         if ix == press.ix && !self.drag_selecting {
             return; // still inside the first block: ordinary text selection
+        }
+        if !self.drag_selecting {
+            TextSelection::end(window, cx);
+            TextSelection::clear(window, cx);
         }
         self.drag_selecting = true;
         let sel = Selection {

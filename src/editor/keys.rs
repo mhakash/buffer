@@ -2,6 +2,7 @@
 //! being edited they go to `editing` (which may leave them to the textarea); otherwise
 //! (blocks selected, or the editor just left) to `selection` / `ops` / `clipboard`.
 
+use gpui_kit::base::TextSelection;
 use gpui_kit::base::actions::{SelectDown, SelectUp};
 use gpui_kit::component::input::{
     Backspace, Copy, Cut, Delete, Enter, Escape, IndentInline, MoveDown, MoveLeft, MoveRight,
@@ -60,7 +61,7 @@ impl BlockEditor {
                 this.edit_escape(window, cx);
             } else {
                 cx.stop_propagation();
-                this.sel_escape(cx);
+                this.sel_escape(window, cx);
             }
         }))
         .capture_action(
@@ -150,8 +151,12 @@ impl BlockEditor {
         }
     }
 
-    /// ⌘C / ⌘X act on selected blocks; while editing the textarea copies its text.
+    /// ⌘C / ⌘X act on selected blocks; while editing the textarea copies its text, and text
+    /// selected in rendered blocks is copied by its text view.
     fn copy_key(&mut self, cut: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.selection.is_none() && TextSelection::has_selection(window, cx) {
+            return;
+        }
         if !self.editing() {
             cx.stop_propagation();
             self.copy_blocks(cut, window, cx);

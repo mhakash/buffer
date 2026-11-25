@@ -187,6 +187,7 @@ Untouched blocks are saved byte for byte, so the file stays yours.
 | ⌘B ⌘I ⌘E ⌘⇧X ⌘K | Bold, italic, code, strikethrough, link |
 | ⌘Enter in code | Leave the code block |
 | Esc while editing · ⇧↑/⇧↓ at a block's edge | Select the block (then ↑↓ move, ⇧↑↓ extend, Enter edits, Esc leaves) |
+| Drag inside a block (not being edited) | Select its text as shown, ⌘C copies it; a plain click edits the block |
 | Drag from one block onto another · shift-click · ⌘A twice | Select a run of blocks |
 | ⌘C ⌘X ⌘V on selected blocks | Copy / cut as Markdown, paste after; Markdown with several blocks pasted into a block splits it |
 | Backspace · ⌘D · ⌘⇧↑/↓ · Tab | Delete · duplicate · move up/down · nest (selected blocks, or the block being edited) |
