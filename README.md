@@ -64,7 +64,7 @@ Settings → Data → Show in Finder opens the active one.
 
 | File | Contents |
 |---|---|
-| `tasks.json` | Index: task titles, priority, order, categories, dates + the category list |
+| `tasks.json` | Index: task titles, priority, order, categories, dates (`follow_up_at` while waiting for a follow-up) + the category list |
 | `tasks/<id>/task.json` | Reserved for task details (empty since 0.27; subtasks, links and log live in `notes.md`) |
 | `tasks/<id>/notes.md` | That task's notes (plain Markdown; edit it in any editor while the app is closed) |
 | `tasks/<id>/files/` | Files uploaded to that task's notes or made in them |
@@ -95,9 +95,10 @@ Type in the composer and press Enter. Inline tokens (anywhere in the text):
 | `\#` `\!` `\\` | Literal `#`, `!`, or `\` in the title (prefix the word, e.g. `\#channel`) |
 
 Without tokens, the priority and category pills at the end of the input apply (each opens a menu; categories toggle, pick several). Hover a task for actions:
-drag the handle to reorder within a priority group (preview while dragging; saved on release), cycle priority, edit, delete (Undo pill stays 8 s).
+drag the handle to reorder within a priority group (preview while dragging; saved on release), status and priority menus, edit, delete (Undo pill stays 8 s).
 Every delete/remove ✕ (tasks, categories, properties) opens a confirmation dialog first.
 Tick the checkbox to complete (row slides out, a toast cheers you on); Done groups by day.
+Tabs: **To do**, **Follow up** (tasks waiting on someone; set via the status menu, longest-waiting first, row shows how long; tasks added on this tab start there), **Done**.
 The hero card above shows today's progress ring, your streak (consecutive days with a completion)
 and the last 7 days.
 
@@ -111,7 +112,7 @@ side panel → closed. The folder button reveals the task's files in Finder.
 | Section | What it holds |
 |---|---|
 | Title | Done checkbox + inline-editable title; "Edited …" time in the toolbar |
-| Properties | Status, priority (click to cycle), categories (+ menu toggles any number), due date (overdue shows red), created |
+| Properties | Status (To do / Follow up / Done) and priority as menus, categories (+ menu toggles any number), due date (overdue shows red), created |
 | Notes | Same block editor and file list as the Notes page (see Block editor, Files), compact in the side panel; Markdown / Rich text toggles the source |
 
 Subtasks, links and the work log are part of the notes: a checklist (`/todo`), pasted links and

@@ -2,7 +2,7 @@ use chrono::{NaiveDate, Utc};
 use gpui_kit::{Context, SharedString};
 
 use super::model::{
-    CATEGORY_COLORS, Category, DATA_VERSION, Id, Priority, Task, TaskData, TaskDetails,
+    CATEGORY_COLORS, Category, DATA_VERSION, Id, Priority, Status, Task, TaskData, TaskDetails,
     category_key, link_markdown,
 };
 use crate::storage;
@@ -118,8 +118,13 @@ impl TaskStore {
         self.data.tasks.iter().find(|t| t.id == id)
     }
 
+    /// Tasks on the To do list (not done, not waiting for a follow-up).
     pub fn open_count(&self) -> usize {
-        self.data.tasks.iter().filter(|t| !t.is_done()).count()
+        self.data
+            .tasks
+            .iter()
+            .filter(|t| t.status() == Status::Todo)
+            .count()
     }
 
     pub fn save_error(&self) -> Option<&SharedString> {
@@ -145,6 +150,7 @@ impl TaskStore {
             category: None,
             created_at: Utc::now(),
             completed_at: None,
+            follow_up_at: None,
             due: None,
             updated_at: None,
             notes: links_markdown(&links),
@@ -248,12 +254,24 @@ impl TaskStore {
         self.commit_task(id, cx);
     }
 
+    /// Done ↔ To do (a ticked follow-up becomes done).
     pub fn toggle_done(&mut self, id: Id, cx: &mut Context<Self>) {
-        if let Some(task) = self.task_mut(id) {
-            task.completed_at = match task.completed_at {
-                Some(_) => None,
-                None => Some(Utc::now()),
-            };
+        let Some(status) = self.task(id).map(Task::status) else {
+            return;
+        };
+        let next = if status == Status::Done {
+            Status::Todo
+        } else {
+            Status::Done
+        };
+        self.set_status(id, next, cx);
+    }
+
+    pub fn set_status(&mut self, id: Id, status: Status, cx: &mut Context<Self>) {
+        if let Some(task) = self.task_mut(id)
+            && task.status() != status
+        {
+            task.set_status(status, Utc::now());
             self.commit(cx);
         }
     }

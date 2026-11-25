@@ -44,16 +44,6 @@ impl Priority {
         }
     }
 
-    /// Next priority in a click-to-cycle order (wraps from Low back to Urgent).
-    pub fn cycle(self) -> Self {
-        match self {
-            Priority::Urgent => Priority::High,
-            Priority::High => Priority::Medium,
-            Priority::Medium => Priority::Low,
-            Priority::Low => Priority::Urgent,
-        }
-    }
-
     pub fn parse(token: &str) -> Option<Self> {
         match token.to_ascii_lowercase().as_str() {
             "urgent" | "u" | "1" | "p1" | "!" => Some(Priority::Urgent),
@@ -61,6 +51,27 @@ impl Priority {
             "medium" | "med" | "m" | "3" | "p3" => Some(Priority::Medium),
             "low" | "l" | "4" | "p4" => Some(Priority::Low),
             _ => None,
+        }
+    }
+}
+
+/// Where a task stands. Derived from `completed_at` / `follow_up_at`, not stored itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Status {
+    Todo,
+    /// Not actionable now: waiting on someone, to be followed up.
+    FollowUp,
+    Done,
+}
+
+impl Status {
+    pub const ALL: [Status; 3] = [Status::Todo, Status::FollowUp, Status::Done];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Status::Todo => "To do",
+            Status::FollowUp => "Follow up",
+            Status::Done => "Done",
         }
     }
 }
@@ -94,6 +105,9 @@ pub struct Task {
     pub created_at: DateTime<Utc>,
     #[serde(default)]
     pub completed_at: Option<DateTime<Utc>>,
+    /// Set while the task waits for a follow-up (since when); cleared when done or back to do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follow_up_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub due: Option<NaiveDate>,
     /// Last edit to the task or its details.
@@ -278,6 +292,34 @@ impl Task {
     pub fn is_done(&self) -> bool {
         self.completed_at.is_some()
     }
+
+    pub fn status(&self) -> Status {
+        if self.is_done() {
+            Status::Done
+        } else if self.follow_up_at.is_some() {
+            Status::FollowUp
+        } else {
+            Status::Todo
+        }
+    }
+
+    /// Moves the task to `status`, keeping existing timestamps when it's already there.
+    pub fn set_status(&mut self, status: Status, now: DateTime<Utc>) {
+        match status {
+            Status::Todo => {
+                self.completed_at = None;
+                self.follow_up_at = None;
+            }
+            Status::FollowUp => {
+                self.completed_at = None;
+                self.follow_up_at.get_or_insert(now);
+            }
+            Status::Done => {
+                self.completed_at.get_or_insert(now);
+                self.follow_up_at = None;
+            }
+        }
+    }
 }
 
 /// Completed-task count per local calendar day.
@@ -449,6 +491,28 @@ pub fn category_key(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn status_round_trips_and_old_files_load() {
+        let json = r#"{"id":1,"title":"t","priority":"high","created_at":"2026-01-01T00:00:00Z"}"#;
+        let mut task: Task = serde_json::from_str(json).unwrap();
+        assert_eq!(task.status(), Status::Todo);
+        let now = Utc::now();
+        task.set_status(Status::FollowUp, now);
+        assert_eq!(task.status(), Status::FollowUp);
+        let saved = serde_json::to_string(&task).unwrap();
+        let back: Task = serde_json::from_str(&saved).unwrap();
+        assert_eq!(back.follow_up_at, Some(now));
+        task.set_status(Status::Done, now);
+        assert_eq!((task.status(), task.follow_up_at), (Status::Done, None));
+        task.set_status(Status::Todo, now);
+        assert_eq!((task.status(), task.completed_at), (Status::Todo, None));
+        assert!(
+            !serde_json::to_string(&task)
+                .unwrap()
+                .contains("follow_up_at")
+        );
+    }
 
     #[test]
     fn parses_tokens_anywhere() {

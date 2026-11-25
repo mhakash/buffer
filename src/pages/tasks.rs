@@ -8,7 +8,7 @@ use gpui_kit::component::{
     checkbox::Checkbox,
     h_flex,
     input::{Escape, Input, InputEvent, InputState},
-    menu::{DropdownMenu, PopupMenuItem},
+    menu::{DropdownMenu, PopupMenu, PopupMenuItem},
     v_flex,
 };
 use gpui_kit::{
@@ -22,7 +22,7 @@ use crate::{
     components::{category_tag, chip, confirm::confirm_delete, fx, icon_button},
     prefs, quotes,
     tasks::{
-        Category, Id, Priority, Task, TaskStore, classify, completions_by_day, last_days,
+        Category, Id, Priority, Status, Task, TaskStore, classify, completions_by_day, last_days,
         parse_quick_add, streak,
     },
 };
@@ -42,18 +42,11 @@ struct Stats {
     week: Vec<usize>,
 }
 
-const VIEWS: [View; 2] = [View::Todo, View::Done];
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum View {
-    Todo,
-    Done,
-}
-
 pub struct TasksPage {
     store: Entity<TaskStore>,
     composer: Entity<InputState>,
-    view: View,
+    /// Tab: which status's tasks are listed.
+    view: Status,
     filter: Option<Id>,
     draft_priority: Priority,
     draft_categories: Vec<Id>,
@@ -154,7 +147,7 @@ impl TasksPage {
         Self {
             store,
             composer,
-            view: View::Todo,
+            view: Status::Todo,
             filter: None,
             draft_priority: Priority::default(),
             draft_categories: Vec::new(),
@@ -355,6 +348,8 @@ impl TasksPage {
         let priority = parsed.priority.unwrap_or(self.draft_priority);
         let fallback = self.draft_categories.clone();
         let editing = self.editing.take();
+        // New tasks join the tab you're on (Done falls back to To do).
+        let add_as = self.view;
         self.store.update(cx, |store, cx| {
             let categories = if parsed.categories.is_empty() {
                 fallback
@@ -371,7 +366,10 @@ impl TasksPage {
                     store.add_links(id, &parsed.links, cx);
                 }
                 None => {
-                    store.add_task(parsed.title, priority, categories, parsed.links, cx);
+                    let id = store.add_task(parsed.title, priority, categories, parsed.links, cx);
+                    if add_as == Status::FollowUp {
+                        store.set_status(id, Status::FollowUp, cx);
+                    }
                 }
             }
         });
@@ -380,7 +378,9 @@ impl TasksPage {
             self.reset_draft();
         }
         self.last_deleted = None;
-        self.view = View::Todo;
+        if self.view == Status::Done {
+            self.view = Status::Todo;
+        }
         cx.notify();
     }
 
@@ -839,57 +839,55 @@ impl TasksPage {
 
     fn render_toolbar(
         &self,
-        open: usize,
-        done: usize,
+        totals: [usize; 3],
         categories: &[Category],
         counts: &[(Id, usize)],
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let view_tabs = h_flex().gap_1().children(VIEWS.into_iter().map(|view| {
-            let (label, count) = match view {
-                View::Todo => ("To do", open),
-                View::Done => ("Done", done),
-            };
-            let active = self.view == view;
-            h_flex()
-                .id(label)
-                .h(px(32.))
-                .gap_2()
-                .pl_3()
-                .pr_2()
-                .rounded_full()
-                .cursor_pointer()
-                .text_sm()
-                .when(active, |this| {
-                    this.bg(theme.secondary_active)
-                        .text_color(theme.foreground)
-                        .font_weight(FontWeight::SEMIBOLD)
-                })
-                .when(!active, |this| {
-                    this.text_color(theme.muted_foreground)
-                        .hover(|s| s.bg(theme.secondary))
-                })
-                .child(label)
-                .child(
-                    div()
-                        .min_w(px(20.))
-                        .px_1p5()
-                        .rounded_full()
-                        .text_xs()
-                        .text_center()
-                        .when(active, |this| {
-                            this.bg(theme.primary.opacity(0.16))
-                                .text_color(theme.primary)
-                        })
-                        .when(!active, |this| this.bg(theme.secondary))
-                        .child(count.to_string()),
-                )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.view = view;
-                    cx.notify();
-                }))
-        }));
+        let view_tabs = h_flex()
+            .gap_1()
+            .children(Status::ALL.into_iter().zip(totals).map(|(view, count)| {
+                let label = view.label();
+                let active = self.view == view;
+                h_flex()
+                    .id(label)
+                    .h(px(32.))
+                    .gap_2()
+                    .pl_3()
+                    .pr_2()
+                    .rounded_full()
+                    .cursor_pointer()
+                    .text_sm()
+                    .when(active, |this| {
+                        this.bg(theme.secondary_active)
+                            .text_color(theme.foreground)
+                            .font_weight(FontWeight::SEMIBOLD)
+                    })
+                    .when(!active, |this| {
+                        this.text_color(theme.muted_foreground)
+                            .hover(|s| s.bg(theme.secondary))
+                    })
+                    .child(label)
+                    .child(
+                        div()
+                            .min_w(px(20.))
+                            .px_1p5()
+                            .rounded_full()
+                            .text_xs()
+                            .text_center()
+                            .when(active, |this| {
+                                this.bg(theme.primary.opacity(0.16))
+                                    .text_color(theme.primary)
+                            })
+                            .when(!active, |this| this.bg(theme.secondary))
+                            .child(count.to_string()),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.view = view;
+                        cx.notify();
+                    }))
+            }));
 
         let filter_chips = categories
             .iter()
@@ -936,8 +934,13 @@ impl TasksPage {
 
     fn sections(&self, mut tasks: Vec<Task>) -> Vec<Section> {
         match self.view {
-            View::Todo => {
-                tasks.sort_by_key(|t| (t.priority, t.sort_order, t.created_at));
+            Status::Todo | Status::FollowUp => {
+                if self.view == Status::Todo {
+                    tasks.sort_by_key(|t| (t.priority, t.sort_order, t.created_at));
+                } else {
+                    // Longest-waiting first.
+                    tasks.sort_by_key(|t| (t.priority, t.follow_up_at, t.created_at));
+                }
                 Priority::ALL
                     .into_iter()
                     .filter_map(|priority| {
@@ -954,7 +957,7 @@ impl TasksPage {
                     })
                     .collect()
             }
-            View::Done => {
+            Status::Done => {
                 tasks.sort_by_key(|t| std::cmp::Reverse(t.completed_at));
                 let today = Local::now().date_naive();
                 let mut sections: Vec<(NaiveDate, Section)> = Vec::new();
@@ -989,12 +992,16 @@ impl TasksPage {
         let theme = cx.theme().clone();
         if tasks.is_empty() {
             let (glyph, message) = match (self.view, self.filter.is_some()) {
-                (View::Todo, false) => (
+                (Status::Todo, false) => (
                     IconName::Sparkles,
                     "All clear. Add something above when it comes up.",
                 ),
-                (View::Todo, true) => (IconName::Sun, "Nothing open in this category."),
-                (View::Done, _) => (IconName::ListTodo, "Completed tasks will show up here."),
+                (Status::Todo, true) => (IconName::Sun, "Nothing open in this category."),
+                (Status::FollowUp, _) => (
+                    IconName::Hourglass,
+                    "Nothing to chase. Set a task's status to Follow up to park it here.",
+                ),
+                (Status::Done, _) => (IconName::ListTodo, "Completed tasks will show up here."),
             };
             let badge = h_flex()
                 .justify_center()
@@ -1120,9 +1127,10 @@ impl TasksPage {
         let priority = task.priority;
         let group = SharedString::from(format!("task-row-{id}"));
         let hover = theme.secondary;
-        let meta = match task.completed_at {
-            Some(ts) => ts.with_timezone(&Local).format("%H:%M").to_string(),
-            None => age(task.created_at),
+        let meta = match (task.completed_at, task.follow_up_at) {
+            (Some(ts), _) => ts.with_timezone(&Local).format("%H:%M").to_string(),
+            (None, Some(since)) => age(since),
+            (None, None) => age(task.created_at),
         };
 
         let checkbox = Checkbox::new(("check", id))
@@ -1159,19 +1167,31 @@ impl TasksPage {
             .gap_0p5()
             .opacity(0.)
             .group_hover(group.clone(), |s| s.opacity(1.))
+            .child({
+                let store = self.store.clone();
+                let status = task.status();
+                icon_button(
+                    ("status", id),
+                    status_icon(status),
+                    status_color(status, &theme),
+                    "Status",
+                )
+                .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
+                    status_menu(menu, &store, id, status)
+                })
+            })
             .when(!done, |this| {
-                let next = priority.cycle();
+                let store = self.store.clone();
                 this.child(
                     icon_button(
                         ("priority", id),
                         IconName::Flag,
-                        hex(next.color()),
-                        format!("Priority → {}", next.label()),
+                        hex(priority.color()),
+                        "Priority",
                     )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.store
-                            .update(cx, |store, cx| store.set_priority(id, next, cx));
-                    })),
+                    .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
+                        priority_menu(menu, &store, id, priority)
+                    }),
                 )
                 .child(
                     icon_button(
@@ -1421,13 +1441,16 @@ impl Render for TasksPage {
         let save_error = store.save_error().cloned();
         let (done, open): (Vec<Task>, Vec<Task>) =
             store.tasks().iter().cloned().partition(Task::is_done);
+        let (todo, follow_up): (Vec<Task>, Vec<Task>) =
+            open.into_iter().partition(|t| t.status() == Status::Todo);
 
-        let stats = Self::stats(&open, &done);
-        let (open_count, done_count) = (open.len(), done.len());
+        let stats = Self::stats(&todo, &done);
+        let totals = [todo.len(), follow_up.len(), done.len()];
 
         let in_view = match self.view {
-            View::Todo => open,
-            View::Done => done,
+            Status::Todo => todo,
+            Status::FollowUp => follow_up,
+            Status::Done => done,
         };
         let counts: Vec<(Id, usize)> = categories
             .iter()
@@ -1463,7 +1486,7 @@ impl Render for TasksPage {
             })
             .child(self.render_composer(&categories, window, cx))
             .children(self.render_toast(&theme))
-            .child(self.render_toolbar(open_count, done_count, &categories, &counts, cx))
+            .child(self.render_toolbar(totals, &categories, &counts, cx))
             .when_some(self.last_deleted.as_ref(), |this, task| {
                 let notice = h_flex()
                     .gap_3()
@@ -1499,8 +1522,64 @@ impl Render for TasksPage {
                     0,
                 )))
             })
-            .child(self.render_list(visible, &categories, self.view == View::Todo, cx))
+            .child(self.render_list(visible, &categories, self.view == Status::Todo, cx))
     }
+}
+
+pub fn status_icon(status: Status) -> IconName {
+    match status {
+        Status::Todo => IconName::Circle,
+        Status::FollowUp => IconName::Hourglass,
+        Status::Done => IconName::CircleCheck,
+    }
+}
+
+pub fn status_color(status: Status, theme: &Theme) -> Hsla {
+    match status {
+        Status::Todo => theme.primary,
+        Status::FollowUp => theme.warning,
+        Status::Done => theme.success,
+    }
+}
+
+/// Status choices for a task's dropdown; the current one is checked.
+pub fn status_menu(
+    mut menu: PopupMenu,
+    store: &Entity<TaskStore>,
+    id: Id,
+    current: Status,
+) -> PopupMenu {
+    for status in Status::ALL {
+        let store = store.clone();
+        menu = menu.item(
+            PopupMenuItem::new(status.label())
+                .checked(status == current)
+                .on_click(move |_, _, cx| {
+                    store.update(cx, |s, cx| s.set_status(id, status, cx));
+                }),
+        );
+    }
+    menu.min_w(px(160.))
+}
+
+/// Priority choices for a task's dropdown; the current one is checked.
+pub fn priority_menu(
+    mut menu: PopupMenu,
+    store: &Entity<TaskStore>,
+    id: Id,
+    current: Priority,
+) -> PopupMenu {
+    for priority in Priority::ALL {
+        let store = store.clone();
+        menu = menu.item(
+            PopupMenuItem::new(priority.label())
+                .checked(priority == current)
+                .on_click(move |_, _, cx| {
+                    store.update(cx, |s, cx| s.set_priority(id, priority, cx));
+                }),
+        );
+    }
+    menu.min_w(px(150.))
 }
 
 fn hex(color: u32) -> Hsla {

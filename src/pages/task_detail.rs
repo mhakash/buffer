@@ -21,11 +21,11 @@ use gpui_kit::{
     Subscription, Window, assets::IconName, div, ease_out_quint, prelude::*, px, rgb,
 };
 
-use super::tasks::due_label;
+use super::tasks::{due_label, priority_menu, status_color, status_menu};
 use crate::{
     components::{category_tag, file_list, icon_button, property_row},
     editor::{BlockEditor, BlockEditorEvent},
-    tasks::{Id, Task, TaskStore},
+    tasks::{Id, Status, Task, TaskStore},
 };
 
 /// Side-panel width bounds; the user drags the left edge between them.
@@ -334,7 +334,6 @@ impl TaskDetail {
         let id = task.id;
         let priority = task.priority;
         let color: Hsla = rgb(priority.color()).into();
-        let next = priority.cycle();
         let assigned: Vec<_> = {
             let all = self.store.read(cx).categories();
             task.categories
@@ -344,37 +343,23 @@ impl TaskDetail {
         };
         let today = Local::now().date_naive();
 
-        let status = match task.completed_at {
-            Some(ts) => h_flex()
-                .gap_1p5()
-                .text_sm()
-                .text_color(theme.success)
-                .child(div().size_2().rounded_full().bg(theme.success))
-                .child(format!("Done {}", when(ts))),
-            None => h_flex()
-                .gap_1p5()
-                .text_sm()
-                .child(div().size_2().rounded_full().bg(theme.primary))
-                .child("Open"),
+        let status = task.status();
+        let status_since = match status {
+            Status::Done => task.completed_at.map(when),
+            Status::FollowUp => task.follow_up_at.map(|ts| format!("since {}", when(ts))),
+            Status::Todo => None,
+        };
+        let status_pill = {
+            let store = self.store.clone();
+            select_pill("detail-status", status.label(), status_color(status, theme))
+                .dropdown_menu(move |menu, _, _| status_menu(menu, &store, id, status))
         };
 
-        let priority_pill = h_flex()
-            .id("detail-priority")
-            .gap_1p5()
-            .px_2()
-            .py_0p5()
-            .rounded_full()
-            .cursor_pointer()
-            .bg(color.opacity(0.14))
-            .hover(|s| s.bg(color.opacity(0.24)))
-            .text_xs()
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(color)
-            .child(div().size_1p5().rounded_full().bg(color))
-            .child(priority.label())
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.store.update(cx, |s, cx| s.set_priority(id, next, cx));
-            }));
+        let priority_pill = {
+            let store = self.store.clone();
+            select_pill("detail-priority", priority.label(), color)
+                .dropdown_menu(move |menu, _, _| priority_menu(menu, &store, id, priority))
+        };
 
         let store = self.store.clone();
         let picker = Button::new("detail-categories")
@@ -412,7 +397,18 @@ impl TaskDetail {
         v_flex()
             .px(px(self.gutter()))
             .py_2()
-            .child(property_row(IconName::CircleDot, "Status", theme).child(status))
+            .child(
+                property_row(IconName::CircleDot, "Status", theme)
+                    .child(status_pill)
+                    .when_some(status_since, |this, since| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(since),
+                        )
+                    }),
+            )
             .child(property_row(IconName::Flag, "Priority", theme).child(priority_pill))
             .child(
                 property_row(IconName::Tags, "Categories", theme).child(
@@ -624,6 +620,28 @@ impl Render for TaskDetail {
 }
 
 /// `today 14:05`, `yesterday 14:05`, `Nov 3, 14:05`.
+/// Tinted pill showing a property's current value; opens its dropdown.
+fn select_pill(id: &'static str, label: &'static str, color: Hsla) -> Button {
+    Button::new(id)
+        .ghost()
+        .xsmall()
+        .rounded(ButtonRounded::Size(px(999.)))
+        .child(
+            h_flex()
+                .gap_1p5()
+                .text_xs()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(color)
+                .child(div().size_1p5().rounded_full().bg(color))
+                .child(label)
+                .child(
+                    Icon::new(IconName::ChevronDown)
+                        .xsmall()
+                        .text_color(color.opacity(0.7)),
+                ),
+        )
+}
+
 pub fn when(ts: DateTime<Utc>) -> String {
     let local = ts.with_timezone(&Local);
     let today = Local::now().date_naive();
