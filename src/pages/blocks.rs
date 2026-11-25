@@ -707,7 +707,7 @@ impl BlocksPage {
             })
             .child(property_row(IconName::Type, "Label", theme).child(input(&d.label)))
             .child(
-                property_row(IconName::Sparkles, "Icon", theme)
+                property_row(IconName::Shapes, "Icon", theme)
                     .child(
                         Icon::empty()
                             .path(blocks::icon_path(&ty.icon, cx))

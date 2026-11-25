@@ -25,6 +25,26 @@ pub fn brand_gradient(theme: &Theme, angle: f32) -> Background {
     )
 }
 
+/// The Buffer mark: the app icon's 2x2 tile grid (`scripts/make_icon.swift`), `size` px square,
+/// one solid tile and three faded ones in `color`.
+pub fn logo(size: f32, color: Hsla) -> Div {
+    let unit = size / 22.;
+    let gap = px(2.8 * unit);
+    let tile = |solid: bool| {
+        div()
+            .size(px(9.6 * unit))
+            .rounded(px(2.4 * unit))
+            .bg(color.opacity(if solid { 1. } else { 0.55 }))
+    };
+    div()
+        .flex_none()
+        .flex()
+        .flex_col()
+        .gap(gap)
+        .child(div().flex().gap(gap).child(tile(true)).child(tile(false)))
+        .child(div().flex().gap(gap).child(tile(false)).child(tile(false)))
+}
+
 /// A faint wash of the brand gradient for large surfaces.
 pub fn wash(theme: &Theme, strength: f32) -> Background {
     linear_gradient(

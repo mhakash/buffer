@@ -678,7 +678,7 @@ impl TasksPage {
             .text_sm()
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme.primary_foreground)
-            .child(Icon::new(IconName::Sparkles).text_color(theme.primary_foreground))
+            .child(fx::logo(14., theme.primary_foreground))
             .child(message);
         Some(
             h_flex()
@@ -992,16 +992,23 @@ impl TasksPage {
         let theme = cx.theme().clone();
         if tasks.is_empty() {
             let (glyph, message) = match (self.view, self.filter.is_some()) {
-                (Status::Todo, false) => (
-                    IconName::Sparkles,
-                    "All clear. Add something above when it comes up.",
-                ),
-                (Status::Todo, true) => (IconName::Sun, "Nothing open in this category."),
+                (Status::Todo, false) => (None, "All clear. Add something above when it comes up."),
+                (Status::Todo, true) => (Some(IconName::Sun), "Nothing open in this category."),
                 (Status::FollowUp, _) => (
-                    IconName::Hourglass,
+                    Some(IconName::Hourglass),
                     "Nothing to chase. Set a task's status to Follow up to park it here.",
                 ),
-                (Status::Done, _) => (IconName::ListTodo, "Completed tasks will show up here."),
+                (Status::Done, _) => (
+                    Some(IconName::ListTodo),
+                    "Completed tasks will show up here.",
+                ),
+            };
+            let glyph = match glyph {
+                Some(icon) => Icon::new(icon)
+                    .text_color(theme.primary_foreground)
+                    .size_8()
+                    .into_any_element(),
+                None => fx::logo(30., theme.primary_foreground).into_any_element(),
             };
             let badge = h_flex()
                 .justify_center()
@@ -1009,11 +1016,7 @@ impl TasksPage {
                 .rounded_full()
                 .bg(fx::brand_gradient(&theme, 135.))
                 .shadow(fx::glow(theme.chart_1.opacity(0.4), 36., 0.))
-                .child(
-                    Icon::new(glyph)
-                        .text_color(theme.primary_foreground)
-                        .size_8(),
-                );
+                .child(glyph);
             return v_flex()
                 .items_center()
                 .justify_center()

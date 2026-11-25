@@ -265,14 +265,6 @@ impl Workspace {
     }
 
     fn render_brand(&self, theme: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
-        // Same 2x2 tile grid as the app icon (scripts/make_icon.swift), scaled from 824px.
-        let tile =
-            |solid: bool| {
-                div().size(px(9.6)).rounded(px(2.4)).bg(theme
-                    .primary_foreground
-                    .opacity(if solid { 1. } else { 0.55 }))
-            };
-        let gap = px(2.8);
         let mark = div()
             .flex()
             .items_center()
@@ -281,12 +273,7 @@ impl Workspace {
             .rounded(px(8.))
             .bg(fx::brand_gradient(theme, 150.))
             .shadow(fx::glow(theme.chart_1.opacity(0.45), 18., 0.))
-            .child(
-                v_flex()
-                    .gap(gap)
-                    .child(h_flex().gap(gap).child(tile(true)).child(tile(false)))
-                    .child(h_flex().gap(gap).child(tile(false)).child(tile(false))),
-            );
+            .child(fx::logo(22., theme.primary_foreground));
         let name = workspaces::get(cx).active().name.clone();
         let mut header = SidebarHeader::new();
         header.interactivity().element_id = Some("workspace-switcher".into());
