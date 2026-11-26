@@ -1,6 +1,6 @@
 # AGENTS.md — Buffer
 
-Personal macOS desktop app (Rust + [GPUI Kit](https://gpui-kit.com) `=0.9.1`, which re-exports its pinned GPUI fork `gpui-pre 0.3.12`). User-facing features, shortcuts, data files → [README.md](README.md). This file: how to change the code safely.
+Personal macOS desktop app (Rust + [GPUI Kit](https://gpui-kit.com) `=0.9.1`, which re-exports its pinned GPUI fork `gpui-pre 0.3.12`). User-facing features, shortcuts, data files → [docs/guide/](docs/guide/) (index and doc rules: [docs/README.md](docs/README.md)). This file: how to change the code safely.
 
 ## Commands
 
@@ -19,7 +19,7 @@ Done = `cargo fmt` + `cargo build` with **zero warnings** + `cargo test` green. 
 ## Delivering a feature
 
 1. Bump `version` in `Cargo.toml` (minor for features, patch for fixes) — shown in status bar + Info.plist; the user checks it to confirm an update.
-2. Update [README.md](README.md) if user-visible behaviour, shortcuts, or data format changed.
+2. Update the docs if user-visible behaviour, shortcuts, data format or build steps changed: where each goes → [docs/README.md](docs/README.md) "Where a change goes". README stays a short overview (features list only).
 3. `make install` only when the user wants the installed app updated (it quits and relaunches their running app).
 4. Commit only after the user confirms; on `main`, conventional style (`feat:`, `fix:`, `chore:`, `docs:`). Repo is local-only (no remote).
 

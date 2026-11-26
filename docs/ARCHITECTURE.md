@@ -1,6 +1,6 @@
 # Buffer — architecture
 
-Module map, state, UI conventions and persistence rules. Features and data files → [README.md](../README.md).
+Module map, state, UI conventions and persistence rules. Features and data files → [guide](guide/).
 
 ## Modules
 
@@ -23,10 +23,14 @@ pages/         one Render view per sidebar page; Page enum lists them (`owns_pan
 components/    thin fn wrappers over kit components + icon Assets; fx.rs = glow/gradient/ring/animations; markdown.rs = `markdown_view` (always use it for Markdown: Mermaid + frontmatter + clickable-image plugins, image resolver); outline.rs = heading outline over a scrolled editor (notes, task notes); lightbox.rs = full-window image view (Global; Workspace renders it last and routes keys via `capture_key`)
 files.rs      files in content are plain Markdown links (no index): copy/create/rename next to the note, `local_links` reads them back; editor/files.rs = `/upload` `/link` `/txt` + Finder drops; components/file_editor.rs = text-file dialog; local link clicks go through `markdown::open_link`
 net.rs        HttpClient for GPUI (ureq on a thread); without it remote images never load
+quotes.rs     daily sidebar line + time-of-day greeting
+themes/       buffer.json: light + dark palettes (hot-reloaded in debug builds)
+scripts/      icon generation, .app bundling, install; ui/ = window/mouse/recording helpers for checking the UI
+bacon.toml    `make dev` rebuild/relaunch job
 ```
 
 - **State**: one `Entity<TaskStore>` created in `Workspace::new`, cloned into pages. Pages `cx.observe(&store, …)` to re-render. All mutations go through `TaskStore` methods, which end in `commit()` (save + `cx.notify()`). Never mutate task data elsewhere.
-- **New page**: steps in README "Add a page". New feature with its own data → own module like `tasks/` with its own JSON file via `storage::{load, save}`.
+- **New page**: steps in [Add a page](#add-a-page). New feature with its own data → own module like `tasks/` with its own JSON file via `storage::{load, save}`.
 - **Imports**: `gpui_kit::*` is GPUI; components under `gpui_kit::component::*`; never add `gpui` as a direct dependency.
 - **Components**: use kit ones (`Button`, `Checkbox`, `Input`, `TabBar`, `Tag`, `Sidebar`, `Icon`, `h_flex`/`v_flex`, tooltips…) before hand-rolling. Kit source: `~/.cargo/registry/src/*/gpui-component-0.9.1/src`.
 - **Theme**: colors via `cx.theme()` (`gpui_kit::component::ActiveTheme`); our mapping: `group_box` = card/surface (translucent so the aurora shows), `secondary` = row hover, `secondary_active` = selected, `primary` = accent, `muted_foreground` = secondary text, `chart_1`–`chart_5` = brand gradient/glow/stat accents (`fx::brand_gradient`, `fx::wash`). Change the palette in `themes/buffer.json`, not in code. No hard-coded colors in views except data-driven ones (priority/category hex in `tasks/model.rs`). Don't mark our themes `is_default` (breaks hot reload).
@@ -43,3 +47,10 @@ net.rs        HttpClient for GPUI (ureq on a thread); without it remote images n
 - Tasks are split: list fields in `tasks.json` (index, `DATA_VERSION` 2); details in `tasks/<id>/task.json` + `notes.md`. Detail fields on `Task` are `#[serde(default, skip_serializing)]` (read from v1 for migration, never written to the index). Save details with `commit_task`, notes with `commit_notes`, index with `commit`.
 - Format changes must stay backward compatible: new fields get `#[serde(default)]`; never rename/remove fields without a migration in `TaskData`. Old user files must still load.
 - `storage::load` quarantines unparseable files; don't replace that with a silent default.
+
+## Add a page
+
+1. Create `src/pages/<name>.rs` with a struct implementing `Render`.
+2. Add a variant to `Page` (+ `ALL`, `label`, `icon`) in `src/pages/mod.rs`.
+3. Hold an `Entity<YourPage>` in `Workspace` and map it in `active_view` / `navigate`.
+4. Optional: add a `Show<Name>` action + key binding in `src/actions.rs`.

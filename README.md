@@ -1,335 +1,91 @@
-# Buffer
+<p align="center">
+  <img src="assets/AppIcon.png" width="112" alt="Buffer icon">
+</p>
 
-Personal work app (formerly **Workdesk**; data and install migrate automatically).
+<h1 align="center">Buffer</h1>
 
-Desktop app for custom work tooling, built on [GPUI](https://gpui.rs/) (Zed's UI framework) via
-[GPUI Kit](https://gpui-kit.com) (GPUI + ready-made components, Lucide icons, JSON themes).
-Aurora-styled UI (drifting glow, springy nav, animated progress) with a task list, a daily
-dashboard (greeting, streak, 7-day chart, progress ring), standalone Markdown notes with custom
-script-driven blocks and a pomodoro Focus timer.
+<p align="center">
+  A calm, native macOS workspace for tasks, notes and focus, with Markdown blocks your own scripts fill.
+</p>
 
-## Install / update
+---
+
+Buffer is a personal desktop app for day-to-day work: a quick task list, Notion-style Markdown
+notes, a pomodoro timer and custom blocks that run your scripts and show their output right in
+a note. Everything is stored as plain JSON and Markdown in a folder you choose, so your data
+stays readable and yours.
+
+It is written in Rust on [GPUI](https://gpui.rs/) (the UI framework behind the Zed editor) via
+[GPUI Kit](https://gpui-kit.com), so it starts instantly and stays light.
+
+## Features
+
+**Tasks**
+- Quick add with inline tokens: `#category`, `!high`, pasted links become labelled notes
+- To do, Follow up and Done tabs; drag to reorder; due dates and priorities
+- Daily dashboard: progress ring, streak and a 7-day chart
+- Task details in a resizable side panel or as a full page, with rich notes
+
+**Notes**
+- Notion-style block editor over plain Markdown: edit in place, drag blocks, slash menu, tables
+- Mermaid diagrams, images, YAML properties and a heading outline
+- Files live in the content: upload, link or create text files, or drop them from Finder
+- Search across content and properties; tags shared with tasks
+
+**Custom blocks**
+- A ```` ```block name ```` fence runs your script (any language) and renders the Markdown it prints or returns
+- Interactive output: scripts can print inputs (text, number, toggle, dropdown, button) that re-run the block
+- Cached results, refresh intervals, timeouts and per-workspace trust
+- Secrets & config vault and keychain references for API tokens
+
+**Focus**
+- Pomodoro timer with breaks, chime and a session log; start it from anywhere with ⌘⇧F
+
+**Workspaces & look**
+- Several workspaces, each a plain folder (a synced folder works too)
+- Light and dark themes from a JSON palette, ambient aurora backdrop, Reduce Motion respected
+
+## Requirements
+
+- macOS with the Xcode Command Line Tools (`xcode-select --install`); the full Xcode is not needed
+- [Rust](https://rustup.rs/) (stable, 2024 edition)
+
+## Install
 
 ```sh
-make install     # builds release, installs ~/Applications/Buffer.app, relaunches it
+git clone <repo-url> buffer && cd buffer
+make install    # builds a release and installs ~/Applications/Buffer.app
 ```
 
-Re-run `make install` after any code change to update. The Dock pin and your data survive updates.
-The rename from Workdesk is the exception: the old app is removed, so pin Buffer once.
-Pin once: right-click the Dock icon → Options → Keep in Dock.
+Run `make install` again to update. Your data and Dock pin survive updates.
 
-Always installs to `~/Applications` (no admin needed) and removes any old `/Applications/Buffer.app` and pre-rename `Workdesk.app`,
-so there's only ever one copy (two copies = two Dock icons).
-
-## Develop
+## Development
 
 ```sh
-make dev         # rebuild + relaunch on every save, throwaway data in /tmp/buffer-dev (brew install bacon)
-make run         # cargo run (debug, your real data)
-make test        # unit tests
-make icon        # regenerate assets/AppIcon.icns from scripts/make_icon.swift
-BUFFER_DATA_DIR=/tmp/wd cargo run   # use throwaway data
+make dev        # rebuild and relaunch on every save, throwaway data (needs `brew install bacon`)
+make test       # unit tests
+BUFFER_DATA_DIR=/tmp/wd cargo run   # run against a throwaway data folder
 ```
 
-Colors, radius and fonts live in `themes/buffer.json` (gpui-kit theme format). In debug builds the
-running app reloads them on save, no rebuild needed; release builds embed the file.
+More in [docs/development.md](docs/development.md).
 
-macOS needs only Xcode Command Line Tools: gpui-kit enables GPUI's `runtime_shaders`, which compiles Metal shaders at startup instead of requiring the full Xcode `metal` compiler.
+## Documentation
 
-Bump `version` in `Cargo.toml` with each feature; it shows in the status bar and the app's Info.plist.
-
-## Data
-
-### Workspaces
-
-A workspace is a root folder holding all content (tasks, notes, focus history, images). Switch with
-the brand block at the top of the sidebar (click → pick one, **New workspace…**, **Open folder…**)
-or in Settings → Workspaces (click a row to switch; edit the active one's name in place; hover a
-row to reveal it in Finder or remove it from the list — its files stay on disk). Switching reloads
-every page; a running focus timer is dropped.
-
-| Location | Contents |
+| Guide | Covers |
 |---|---|
-| App dir: `~/Library/Application Support/Buffer/` (or `$BUFFER_DATA_DIR`) | `settings.json` + `workspaces.json` + `vault.json` (secrets & config, mode 0600) + `bin/buffer-get` (app-level, shared by all workspaces); also the root of the default workspace (**Personal**), so pre-0.16 data loads unchanged. A pre-rename `Workdesk` folder is moved here on first launch. |
-| `<app dir>/Workspaces/<name>/` | Root of a workspace made with **New workspace** |
-| any folder | Root of a workspace added with **Open folder…** (e.g. a synced folder) |
+| [Tasks](docs/guide/tasks.md) | Quick add, tabs, task details, Focus timer |
+| [Notes](docs/guide/notes.md) | Notes, the block editor, files, Markdown extras |
+| [Custom blocks](docs/guide/custom-blocks.md) | Writing block scripts, inputs, secrets & config |
+| [Workspaces & data](docs/guide/data.md) | Workspaces, where files live, their formats |
+| [Shortcuts & appearance](docs/guide/shortcuts.md) | Keyboard shortcuts, themes, motion settings |
+| [Development](docs/development.md) | Building, installing, themes, references |
+| [Architecture](docs/ARCHITECTURE.md) | Code layout and conventions for contributors |
 
-`workspaces.json`: `{"active": <id>, "workspaces": [{"id", "name", "path", "blocks_trusted"}]}`; no `path` =
-the app dir; `blocks_trusted` (omitted = false) lets custom blocks run their scripts.
-A missing file means just the default workspace.
+How to keep these up to date: [docs/README.md](docs/README.md).
 
-### Files in a workspace root
+## Built with
 
-Settings → Data → Show in Finder opens the active one.
-
-| File | Contents |
-|---|---|
-| `tasks.json` | Index: task titles, priority, order, categories, dates (`follow_up_at` while waiting for a follow-up) + the category list |
-| `tasks/<id>/task.json` | Reserved for task details (empty since 0.27; subtasks, links and log live in `notes.md`) |
-| `tasks/<id>/notes.md` | That task's notes (plain Markdown; edit it in any editor while the app is closed) |
-| `tasks/<id>/files/` | Files uploaded to that task's notes or made in them |
-| `notes.json` | Notes index: ids, created/edited times, tags, properties |
-| `notes/<id>.md` | One standalone note (plain Markdown) |
-| `notes/<id>/` | Files uploaded to that note or made in it (linked from its content) |
-| `focus.json` | Focus length + log of finished focus sessions. |
-| `blocks/<name>/block.json` + script | A custom block type (see Custom blocks) |
-| `.cache/blocks/<key>.json` | Last output of each custom block (safe to delete) |
-
-Every file is written atomically; editing a task rewrites only its own folder (notes: only `notes.md`).
-Pre-0.7 data (everything inline in `tasks.json`) is split into folders on first launch, after copying
-the original to `tasks.v1-backup.json`. App-level: `settings.json` = theme, your name (greeting),
-ambient motion on/off, detail-panel width.
-
-An unreadable file is renamed `*.corrupt-<timestamp>.json`, never overwritten. When changing the
-format, add fields with `#[serde(default)]` (`src/tasks/model.rs`) so old files still load.
-
-## Tasks
-
-Type in the composer and press Enter. Inline tokens (anywhere in the text):
-
-| Token | Effect |
-|---|---|
-| `#name` | Category, repeatable (`#work #review`); matched loosely (`#follow-up` = "Follow-up"), created if new |
-| `!urgent` `!high` `!medium` `!low` (or `!1`–`!4`) | Priority |
-| `https://…` | Added to the task's notes as a labelled link (Jira/GitLab/GitHub recognised); a link alone becomes the title, e.g. `PAY-88` |
-| `\#` `\!` `\\` | Literal `#`, `!`, or `\` in the title (prefix the word, e.g. `\#channel`) |
-
-Without tokens, the priority and category pills at the end of the input apply (each opens a menu; categories toggle, pick several). Hover a task for actions:
-drag the handle to reorder within a priority group (preview while dragging; saved on release), status and priority menus, edit, delete (Undo pill stays 8 s).
-Every delete/remove ✕ (tasks, categories, properties) opens a confirmation dialog first.
-Tick the checkbox to complete (row slides out, a toast cheers you on); Done groups by day.
-Tabs: **To do**, **Follow up** (tasks waiting on someone; set via the status menu, longest-waiting first, row shows how long; tasks added on this tab start there), **Done**.
-The hero card above shows today's progress ring, your streak (consecutive days with a completion)
-and the last 7 days.
-
-## Task details
-
-Click a task's title to open it in a side panel. Drag the panel's left edge to resize it (width is
-remembered). Wide windows dock it beside the list; narrower ones float it over the page. The ⤢ button
-opens the task as a full page (Notion-style); ← Tasks or × closes it. Esc steps back: notes block or source →
-side panel → closed. The folder button reveals the task's files in Finder.
-
-| Section | What it holds |
-|---|---|
-| Title | Done checkbox + inline-editable title; "Edited …" time in the toolbar |
-| Properties | Status (To do / Follow up / Done) and priority as menus, categories (+ menu toggles any number), due date (overdue shows red), created |
-| Notes | Same block editor, outline and file list as the Notes page (see Notes, Block editor, Files), compact in the side panel; Markdown / Rich text toggles the source |
-
-Subtasks, links and the work log are part of the notes: a checklist (`/todo`), pasted links and
-log lines (`/log`), available in any note. Tasks from before 0.27 had them as separate lists; on
-first launch each task's lists are appended to its notes (`## Subtasks`, `## Links`,
-`## Work log`, newest entry first) and the old `task.json` is kept as `task.v2-backup.json`.
-Links typed in quick add land in the notes too.
-
-List rows show the due date and badges read from the notes: checklist progress (`2/5`), links
-(label or count) and a notes icon; more than two categories collapse into `+n`.
-Focus → "Up next" opens the same panel.
-
-## Focus
-
-Pomodoro timer: pick 15/25/45/60 min, Start (⌘⇧F from anywhere). Finished focus sessions are
-logged and followed by a 5-min break (15 min every 4th). A chime plays at the end of each phase.
-The sidebar shows the countdown while a session is active. "Up next" = your top open task.
-
-## Notes
-
-Standalone Markdown notes for anything that isn't a task (⌘3; ⌘⇧N creates one from anywhere),
-laid out like Notion across the whole content area: a list pane (newest edit first, search filters
-by content and property values) and the open note as a document. The title is always editable
-(Enter jumps to the body). The body is a Notion-style block editor (below); the Markdown /
-Rich text button switches to editing the raw source. Esc closes a property field, then the block
-being edited, then full view. The panel button hides the
-list (full view). In the file the title is the first line (`# Title`). A note left empty (no
-text, tags or properties) is discarded when you leave it; the trash button deletes (with
-confirmation).
-
-Properties under the title: Created, Edited, Tags (the task categories; + toggles), and any
-number of your own text properties ("Add a property" → name, Enter → value). Click a value to
-edit it; URL values get an open button; hover a row to remove it.
-
-A note with headings shows an outline at the document's top right: a dash per heading (longer for
-higher levels), the section being read highlighted. Hover it to list the titles; click one to
-scroll there.
-
-### Files
-
-Files are plain links in the content. In the block editor:
-
-| Input | Effect |
-|---|---|
-| `/upload` (Upload file) | Pick files; each is copied next to the note and linked on its own line |
-| `/link` (Link file) | Pick files; linked where they are (nothing copied) |
-| `/log` (Log entry) | Bullet starting with the current time (`**Nov 20, 14:05** — `), for a work log |
-| A line holding only a URL | Labelled when you leave it: Jira → `[PAY-88](…)`, GitLab MR → `!412`, issues → `#7`, GitHub PRs, Confluence pages |
-| `/txt` (Text file) | Makes `untitled.txt`, links it and opens it with the name selected: type a name (`body.json`), Enter, paste the content |
-| Drag files from Finder | Copied and linked where they're dropped (a line shows where) |
-
-Copies go in `notes/<id>/` (task notes: `tasks/<id>/files/`) and are linked relatively,
-`[spec.pdf](<3/spec.pdf>)`; images are embedded (`![…](…)`). Click a link to open it: text
-files (≤ 4 MB) open in an editor dialog (line numbers, saved as you type, copy contents, show
-in Finder); anything else opens in its default app. Any local link works the same, written by
-hand too (relative to the note's folder, `~/…`, absolute, `file://`).
-
-The end of a note lists every file it links to (size, **Linked**, or **Missing** if gone); click
-to open, hover to show in Finder. Renaming a new text file in its dialog rewrites its link.
-Deleting a link leaves the copied file on disk; deleting a note deletes its folder.
-
-### Block editor
-
-Notes and task notes share one editor. Every paragraph, heading, list item, to-do, quote, code
-fence, table and divider is a block. Blocks show
-formatted; click one to edit it in place, formatting and all: Markdown markers stay hidden (the link
-address shows while the caret is in a link; Enter there finishes it). Pressing on text puts the caret
-there and dragging selects it, like Notion; ⌘C copies plain text (formatting kept when pasted back
-into a note). A click on a link opens it (⌘-click while editing that block).
-Untouched blocks are saved byte for byte, so the file stays yours.
-
-| Input | Effect |
-|---|---|
-| `/` in an empty block | Block menu with its own search field (type to filter, ↑↓/Tab Enter; Esc, a space or no match puts `/…` back as text; Backspace on an empty search drops the `/`); also the + handle on hover |
-| `# ` `## ` `### ` · `- ` · `1. ` · `[] ` · `> ` · ```` ``` ```` · `---` | Turn the block into heading · bullet · numbered · to-do · quote · code · divider |
-| Enter / ⇧Enter | New block (lists continue; Enter on an empty item leaves the list) / line break |
-| Backspace at start | Turn into text, then join with the block above |
-| ↑ ↓ ← → at an edge · Tab / ⇧Tab | Move between blocks · nest / un-nest list items |
-| ⌘B ⌘I ⌘E ⌘⇧X ⌘K | Bold, italic, code, strikethrough, link |
-| ⌘Enter in code | Leave the code block |
-| Esc while editing · ⇧↑/⇧↓ at a block's edge | Select the block (then ↑↓ move, ⇧↑↓ extend, Enter edits, Esc leaves) |
-| Drag inside a block (not being edited) | Select its text as shown, ⌘C copies it; a plain click edits the block |
-| Drag from one block onto another · shift-click · ⌘A twice | Select a run of blocks |
-| ⌘C ⌘X ⌘V on selected blocks | Copy / cut as Markdown, paste after; Markdown with several blocks pasted into a block splits it |
-| Backspace · ⌘D · ⌘⇧↑/↓ · Tab | Delete · duplicate · move up/down · nest (selected blocks, or the block being edited) |
-| ⌘Z / ⌘⇧Z | Undo / redo (typing in the open block first, then block changes) |
-| Drag ⋮⋮ | Move the block (or the whole selection); a line shows where it lands |
-| Click ⋮⋮ or right-click a block | Turn into, copy, duplicate, move up/down, delete |
-| Table (`/table`, or any GFM table) | Click a cell to edit it; Tab / ⇧Tab and ←→ at an edge walk cells (Tab past the last adds a row); ↑↓ change rows; Enter goes down (adds a row at the bottom); ⌘Enter leaves. Hover + bars add a row / column; right-click a cell to insert or delete rows and columns. Saved as a padded GFM table, column alignment kept |
-
-## Markdown extras
-
-Task notes and notes render the same Markdown, plus:
-
-| Syntax | Renders as |
-|---|---|
-| ```` ```mermaid ```` fence | Diagram (flowchart, sequence, class, state, ER, gantt, pie, …), rendered natively with Mermaid's own layouts (as on GitHub), in the app's palette with one brand color per node; invalid syntax shows the error and source |
-| Leading `---` YAML block | Property rows (lists as pills) |
-| `![](https://…)` | Remote image (fetched by the app) |
-| `![](file.png)`, `~/…`, `/abs/…`, `file://…` | Local image; relative paths resolve against the note's folder (`notes/` or `tasks/<id>/`) |
-
-Click a diagram, or an image on its own line, to open it full-window; click or Esc closes.
-
-## Custom blocks
-
-A custom block runs a script and shows the Markdown it prints. Make one on the **Blocks** page (⌘4):
-+ starts a block with a Python starter script; fill in the form, Save. Use it in a note by typing `/`
-and picking it under Custom, or by writing a fence:
-
-````markdown
-```block report
-since: 7d
-limit: 5
-```
-````
-
-| Part | Behaviour |
-|---|---|
-| Config | `key: value` lines in the fence; params not given use their defaults. Editing the block shows the params it takes |
-| Script | Runs in `blocks/<name>/` through your login shell (Homebrew tools work). Gets params as JSON on stdin, in `BUFFER_BLOCK_INPUT`, and as `BLOCK_<NAME>` env vars; stdout = the Markdown; non-zero exit = failed (stderr shown, last output kept) |
-| Return | Instead of printing (or as well), a Python script can define `run(params)` and a Node script can export `run` or a default function (sync or async): what it returns is appended to stdout. Picked by the Interpreter's name (`python…`, `node`); other interpreters only print |
-| Environment | Per block type. Values can be literal, `secret:NAME` / `config:NAME` (from Secrets & config, below), or `keychain:<service>` (login keychain, `security add-generic-password -s <service> -a $USER -w`). A reference that isn't set fails the run with a message |
-| `buffer-get NAME` | On every block script's PATH: prints NAME from Secrets & config for the block's workspace (exit 1 if not set), so scripts can read values they don't declare |
-| Refresh | Output is cached; a block older than its **Fresh for** seconds re-runs when shown (0 = never); a failed run retries after 30 s. **Timeout** kills the script and anything it started |
-| Look | Output renders flat, in the note's own text style; a muted line under it (block name, last update, ↻, ✎ Edit) shows on hover, or always while running, failed or off |
-| Clicks | In the output, clicks select text, copy and follow links as usual; **Edit** on that line, or **Edit config** in the block's ⋮⋮ menu, opens the block's config; that menu also has **Refresh** |
-| Inputs | An ```` ```input ```` fence in the output becomes a row of controls (see below). Changing one writes `name: value` into the note's fence (⌘Z undoes it) and re-runs the block; the old output stays up while it runs |
-| Trust | Off per workspace until you click **Allow…** on a block (or Settings → Workspaces → Run block scripts). Test runs on the Blocks page always run |
-| Saving | Explicit (Save). Every save re-runs that type's blocks; editing the script outside the app doesn't, so use ↻ |
-| On disk | Block folders added, removed or whose `block.json` changed outside the app are picked up when you switch back to Buffer, or within 15 s — no restart |
-
-### Inputs in block output
-
-A script makes its output interactive by printing controls, one per line:
-
-````markdown
-```input
-text q placeholder="Filter title"
-select status label=Status options="Any|Open|Done" default=Any
-number limit label=Limit default=5
-toggle mine label="Only mine"
-button sync label=Sync
-```
-````
-
-| Kind | Shows | Sends |
-|---|---|---|
-| `text`, `number` | Field; commits on Enter or when it loses focus | `name: <text>` |
-| `toggle` | Switch | `name: true` / `false` |
-| `select` | Dropdown of `options` (`\|`-separated) | `name: <option>` |
-| `button` | Button | One run with `action: <name>` in the input (not saved; the result replaces the output) |
-
-Line format: `<kind> <name> key=value…`, keys `label`, `placeholder`, `default`, `options`; quote
-values with spaces (`\"` inside quotes). A control's value is the fence's `name`, else `default`,
-so the next run gets it like any config key (stdin JSON, `BLOCK_<NAME>`). Controls are inert on
-the Blocks page's test run and while block scripts are off.
-
-### Secrets & config
-
-Settings → Secrets & config holds named values for block scripts: **All workspaces**, plus per-workspace
-overrides (**Only "<workspace>"**; an override wins). Mark a value **Secret** to keep it out of the UI
-(shown as dots; edit = replace). Everything lives in `vault.json` in the app dir, readable only by you;
-it's never written into a workspace folder. Shape:
-`{"global": [{"name", "value", "secret"}], "workspaces": {"<id>": [ … ]}}`. Outside a block,
-`BUFFER_WORKSPACE_ID=<id> Buffer.app/Contents/MacOS/buffer get NAME` does the same lookup.
-
-## Look
-
-Palette lives in `themes/buffer.json`; `chart.1`–`chart.5` drive the brand gradient, glows and
-the ambient backdrop. Settings → Appearance → Ambient motion turns off the drifting glow and
-pulsing indicators (saves battery); they also pause while the window is in the background. macOS "Reduce motion" is honoured by every animation.
-
-## Shortcuts
-
-| Keys | Action |
-|---|---|
-| ⌘N / ⌘⇧N | New task (focus composer) / new note |
-| ⌘1 / ⌘2 / ⌘3 / ⌘4 / ⌘, | Tasks / Focus / Notes / Blocks / Settings |
-| ⌘⇧F | Start/pause focus timer |
-| Enter / Esc | Add or save / cancel edit |
-| ⌘⇧T | Toggle light/dark |
-| ⌘W / ⌘Q | Close window (app stays in Dock) / Quit |
-
-## Layout
-
-| Path | Purpose |
-|---|---|
-| `src/main.rs` | App entry, window, Dock reopen |
-| `src/actions.rs` | Actions, key bindings, menu bar |
-| `src/storage.rs` | JSON load/save; the only place paths are resolved: `data_dir()` = active workspace root (content), `app_dir()` = app config |
-| `src/workspaces.rs` | Workspace registry (`workspaces.json`) as a global: create, open folder, switch, rename, remove |
-| `src/prefs.rs` | `settings.json` (appearance, name, ambient) as a global |
-| `src/theme.rs` | Light/dark appearance over gpui-kit's `Theme`; loads `themes/` |
-| `src/focus/` | `FocusTimer` entity (pomodoro state, `focus.json`) |
-| `src/notes/` | `NoteStore` entity (`notes.json` + `notes/<id>.md`) |
-| `src/files.rs` | File links in content: copy/create/rename, kinds, text sniffing, links read back from Markdown |
-| `src/editor/` | Block editor for notes and task notes; `mod.rs` lists its files |
-| `src/blocks/` | Custom blocks: model + fence config, store, script runner, cache/trust, starter script; `mod.rs` lists its files |
-| `src/net.rs` | HTTP client GPUI uses for remote images |
-| `src/quotes.rs` | Daily sidebar line + time-of-day greeting |
-| `themes/buffer.json` | Light + dark palettes (hot-reloaded in debug builds) |
-| `src/workspace.rs` | Root view: aurora backdrop, title bar clock, sidebar, page transitions |
-| `src/tasks/` | Task model, quick-add parser, link classifier (`links.rs`), `TaskStore` entity (index + per-task folders, v1 migration) |
-| `src/pages/` | One file per page; `Page` enum drives the sidebar |
-| `src/components/` | Thin wrappers over gpui-kit (`chip`, `icon_button`, `category_tag`, `card`), icon `Assets`, `markdown_view` (Mermaid, frontmatter, image paths), `lightbox` (full-window image view), `property_row`, `fx` (glow, gradients, ring, enter/pulse animations) |
-| `bacon.toml` | `make dev` rebuild/relaunch job |
-| `scripts/` | Icon generation, `.app` bundling, install; `ui/` = window/mouse/recording helpers for checking the UI |
-
-## Add a page
-
-1. Create `src/pages/<name>.rs` with a struct implementing `Render`.
-2. Add a variant to `Page` (+ `ALL`, `label`, `icon`) in `src/pages/mod.rs`.
-3. Hold an `Entity<YourPage>` in `Workspace` and map it in `active_view` / `navigate`.
-4. Optional: add a `Show<Name>` action + key binding in `src/actions.rs`.
-
-## References
-
-- [GPUI Kit docs](https://gpui-kit.com) · [repo](https://github.com/longbridge/gpui-kit)
-- [GPUI README](https://github.com/zed-industries/zed/tree/main/crates/gpui) · [examples](https://github.com/zed-industries/zed/tree/main/crates/gpui/examples)
-- [Lucide icons](https://lucide.dev/icons) (names map to `gpui_kit::assets::IconName`)
+[GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) ·
+[GPUI Kit](https://gpui-kit.com) ·
+[Lucide icons](https://lucide.dev/icons) ·
+[merman](https://crates.io/crates/merman) (Mermaid diagrams)
