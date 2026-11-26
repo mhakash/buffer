@@ -2,7 +2,8 @@
 //!
 //! The script runs through the user's login shell (`$SHELL -l -c`), because an app launched from
 //! the Dock gets a bare `PATH` without Homebrew. Contract: the input JSON on stdin and as
-//! `BLOCK_<PARAM>` env vars; stdout is the Markdown; a non-zero exit is a failure (stderr shown).
+//! `BLOCK_<PARAM>` env vars (whole: `BUFFER_BLOCK_INPUT`); stdout is the Markdown, plus what a
+//! Python/Node script's `run(params)` returns; a non-zero exit is a failure (stderr shown).
 //! It runs in its own process group so a timeout kills whatever the script started too.
 
 use std::{
@@ -37,12 +38,28 @@ pub struct Job {
     pub timeout: Duration,
 }
 
+/// Python and Node scripts run through a harness that also prints what their `run(params)`
+/// returns, so a script can return its Markdown instead of printing it.
+const PY_HARNESS: &str = include_str!("harness.py");
+const JS_HARNESS: &str = include_str!("harness.js");
+
 impl Job {
     pub fn command(interpreter: &str, script: &str) -> Vec<String> {
-        if interpreter.trim().is_empty() {
-            vec![format!("./{script}")]
+        let interpreter = interpreter.trim();
+        if interpreter.is_empty() {
+            return vec![format!("./{script}")];
+        }
+        let program = interpreter.rsplit('/').next().unwrap_or(interpreter);
+        let harness = if program.starts_with("python") {
+            Some(("-c", PY_HARNESS))
+        } else if program == "node" || program == "nodejs" {
+            Some(("-e", JS_HARNESS))
         } else {
-            vec![interpreter.trim().to_string(), script.to_string()]
+            None
+        };
+        match harness {
+            Some((flag, code)) => vec![interpreter.into(), flag.into(), code.into(), script.into()],
+            None => vec![interpreter.into(), script.into()],
         }
     }
 }
@@ -95,6 +112,11 @@ fn execute(job: &Job) -> anyhow::Result<(String, String, bool)> {
         };
         cmd.env(format!("BLOCK_{}", env_name(key)), value);
     }
+    let input = serde_json::to_vec(&job.input)?;
+    cmd.env(
+        "BUFFER_BLOCK_INPUT",
+        String::from_utf8_lossy(&input).as_ref(),
+    );
     for (key, value) in &job.env {
         let value = match value.strip_prefix(KEYCHAIN) {
             Some(service) => keychain(service.trim())?,
@@ -106,7 +128,6 @@ fn execute(job: &Job) -> anyhow::Result<(String, String, bool)> {
     let mut child = cmd
         .spawn()
         .map_err(|e| anyhow::anyhow!("couldn't start {}: {e}", job.shell.display()))?;
-    let input = serde_json::to_vec(&job.input)?;
     let mut stdin = child.stdin.take();
     let writer = thread::spawn(move || {
         if let Some(stdin) = stdin.as_mut() {
@@ -282,6 +303,80 @@ mod tests {
         let out = run(&job);
         assert!(out.ok, "{}", out.stderr);
         assert_eq!(out.markdown.trim(), "value of TOKEN");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn script_job(dir: &std::path::Path, interpreter: &str, file: &str, script: &str) -> Job {
+        fs::write(dir.join(file), script).unwrap();
+        Job {
+            shell: "/bin/sh".into(),
+            dir: dir.into(),
+            command: Job::command(interpreter, file),
+            input: json!({"who": "ana"}).as_object().cloned().unwrap(),
+            env: Vec::new(),
+            timeout: Duration::from_secs(20),
+        }
+    }
+
+    fn on_path(program: &str) -> bool {
+        Command::new("/bin/sh")
+            .args(["-c", &format!("command -v {program}")])
+            .stdout(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+
+    #[test]
+    fn python_scripts_print_or_return() {
+        if !on_path("python3") {
+            return;
+        }
+        let dir = scratch("py");
+        let cases = [
+            "def run(p):\n    return f\"hi {p['who']}\"\n",
+            "async def run(p):\n    return 'hi ' + p['who']\n",
+            "import json, sys\nprint('hi', json.load(sys.stdin)['who'])\n",
+            "import json, sys\np = json.load(sys.stdin)\nprint('hi', end=' ')\ndef run():\n    return p['who']\n",
+        ];
+        for script in cases {
+            let out = run(&script_job(&dir, "python3", "run.py", script));
+            assert!(out.ok, "{script}: {}", out.stderr);
+            assert_eq!(out.markdown.trim(), "hi ana", "{script}");
+        }
+        let out = run(&script_job(
+            &dir,
+            "python3",
+            "run.py",
+            "def run(p):\n    raise ValueError('nope')\n",
+        ));
+        assert!(!out.ok);
+        assert!(out.stderr.contains("ValueError: nope"), "{}", out.stderr);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn node_scripts_print_or_return() {
+        if !on_path("node") {
+            return;
+        }
+        let dir = scratch("node");
+        let cases = [
+            ("run.js", "exports.run = (p) => `hi ${p.who}`;\n"),
+            ("run.js", "module.exports = async (p) => 'hi ' + p.who;\n"),
+            (
+                "run.mjs",
+                "export async function run(p) { return 'hi ' + p.who; }\n",
+            ),
+            (
+                "run.js",
+                "console.log('hi', JSON.parse(require('fs').readFileSync(0, 'utf8')).who);\n",
+            ),
+        ];
+        for (file, script) in cases {
+            let out = run(&script_job(&dir, "node", file, script));
+            assert!(out.ok, "{script}: {}", out.stderr);
+            assert_eq!(out.markdown.trim(), "hi ana", "{script}");
+        }
         fs::remove_dir_all(dir).unwrap();
     }
 

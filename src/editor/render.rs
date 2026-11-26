@@ -2,6 +2,8 @@
 //! between them doesn't move the text. Each row reaches left into the gutter (so hovering the
 //! handles keeps them shown) and records its bounds for pointer hit-testing.
 
+use std::sync::Arc;
+
 use gpui_kit::base::TextSelection;
 use gpui_kit::component::{
     Icon, Sizable, Size, Theme,
@@ -20,7 +22,10 @@ use super::{
     rich::{RichText, rich_text_view},
 };
 use crate::blocks::{self, model::ParamKind};
-use crate::components::{document_style, markdown_style, markdown_view, take_claimed_click};
+use crate::components::{
+    BlockHost, document_style, hosted_markdown_view, markdown_style, markdown_view,
+    take_claimed_click,
+};
 
 const INDENT: f32 = 24.;
 const MARKER_W: f32 = 24.;
@@ -223,16 +228,20 @@ impl BlockEditor {
             }
         });
         if code_like {
+            let host =
+                matches!(kind, Kind::Code(lang) if blocks::model::fence_type(lang).is_some())
+                    .then(|| self.block_host(id, cx));
             return div()
                 .flex_1()
                 .min_w_0()
                 .cursor_text()
                 .text_size(px(if compact { 14. } else { 16. }))
-                .child(markdown_view(
+                .child(hosted_markdown_view(
                     ("blk-md", id),
                     block.source(),
                     style(),
                     self.dir.clone(),
+                    host,
                 ))
                 .into_any_element();
         }
@@ -312,6 +321,18 @@ impl BlockEditor {
                 .into_any_element(),
             _ => return None,
         })
+    }
+
+    /// Lets controls in custom block `id`'s output write their values into its fence.
+    fn block_host(&self, id: u64, cx: &Context<Self>) -> BlockHost {
+        let editor = cx.entity().downgrade();
+        BlockHost {
+            // Block ids are per document; the notes page and the task panel can both be open.
+            id: cx.entity_id().as_u64() << 32 ^ id,
+            set: Arc::new(move |name: &str, value: &str, cx: &mut App| {
+                let _ = editor.update(cx, |this, cx| this.set_block_param(id, name, value, cx));
+            }),
+        }
     }
 
     /// "+" (add below) and the drag handle, shown on hover (and on selected blocks).

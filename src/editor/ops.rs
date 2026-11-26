@@ -20,6 +20,25 @@ impl BlockEditor {
             .or_else(|| self.active.map(|ix| ix..ix + 1))
     }
 
+    /// A control in custom block `id`'s output changed: `key: value` goes into its fence (one
+    /// undo step), which re-runs the block.
+    pub(super) fn set_block_param(
+        &mut self,
+        id: u64,
+        key: &str,
+        value: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ix) = self.index_of(id) else { return };
+        let text = crate::blocks::model::set_param(&self.doc.blocks[ix].text, key, value);
+        if text == self.doc.blocks[ix].text {
+            return;
+        }
+        self.checkpoint();
+        self.doc.blocks[ix].set_text(text);
+        self.changed(cx);
+    }
+
     /// Smallest range covering `ids` (ids are contiguous for selections and drags).
     pub(super) fn range_of_ids(&self, ids: &[u64]) -> Option<Range<usize>> {
         let ixs: Vec<usize> = ids.iter().filter_map(|id| self.index_of(*id)).collect();

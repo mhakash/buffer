@@ -8,7 +8,7 @@ use gpui_kit::component::input::{
     Backspace, Copy, Cut, Delete, Enter, Escape, IndentInline, MoveDown, MoveLeft, MoveRight,
     MoveUp, OutdentInline, Paste, Redo, SelectAll, Undo,
 };
-use gpui_kit::{Context, Div, Stateful, Window, prelude::*};
+use gpui_kit::{App, Context, Div, Stateful, Window, prelude::*};
 
 use super::{
     BlockEditor,
@@ -18,13 +18,26 @@ use super::{
     },
 };
 
+/// A captured key handler that stands aside while focus is in a control in a custom block's
+/// output (neither the block textarea nor the editor itself): the keys are the control's.
+fn guarded<A: 'static>(
+    cx: &Context<BlockEditor>,
+    f: impl Fn(&mut BlockEditor, &A, &mut Window, &mut Context<BlockEditor>) + 'static,
+) -> impl Fn(&A, &mut Window, &mut App) + 'static {
+    cx.listener(move |this, action, window, cx| {
+        if this.editing() || this.focus_handle.is_focused(window) {
+            f(this, action, window, cx);
+        }
+    })
+}
+
 impl BlockEditor {
     fn editing(&self) -> bool {
         self.active.is_some()
     }
 
     pub(super) fn bind_keys(&self, root: Stateful<Div>, cx: &Context<Self>) -> Stateful<Div> {
-        root.capture_action(cx.listener(|this, action: &Enter, window, cx| {
+        root.capture_action(guarded(cx, |this, action: &Enter, window, cx| {
             if this.editing() {
                 this.edit_enter(action, window, cx);
             } else {
@@ -32,31 +45,31 @@ impl BlockEditor {
                 this.sel_enter(window, cx);
             }
         }))
-        .capture_action(
-            cx.listener(|this, _: &Backspace, window, cx| this.remove_key(false, window, cx)),
-        )
-        .capture_action(
-            cx.listener(|this, _: &Delete, window, cx| this.remove_key(true, window, cx)),
-        )
-        .capture_action(
-            cx.listener(|this, _: &MoveUp, window, cx| this.vertical(-1, false, window, cx)),
-        )
-        .capture_action(
-            cx.listener(|this, _: &MoveDown, window, cx| this.vertical(1, false, window, cx)),
-        )
-        .capture_action(
-            cx.listener(|this, _: &SelectUp, window, cx| this.vertical(-1, true, window, cx)),
-        )
-        .capture_action(
-            cx.listener(|this, _: &SelectDown, window, cx| this.vertical(1, true, window, cx)),
-        )
-        .capture_action(
-            cx.listener(|this, _: &MoveLeft, window, cx| this.edit_horizontal(-1, window, cx)),
-        )
-        .capture_action(
-            cx.listener(|this, _: &MoveRight, window, cx| this.edit_horizontal(1, window, cx)),
-        )
-        .capture_action(cx.listener(|this, _: &Escape, window, cx| {
+        .capture_action(guarded(cx, |this, _: &Backspace, window, cx| {
+            this.remove_key(false, window, cx)
+        }))
+        .capture_action(guarded(cx, |this, _: &Delete, window, cx| {
+            this.remove_key(true, window, cx)
+        }))
+        .capture_action(guarded(cx, |this, _: &MoveUp, window, cx| {
+            this.vertical(-1, false, window, cx)
+        }))
+        .capture_action(guarded(cx, |this, _: &MoveDown, window, cx| {
+            this.vertical(1, false, window, cx)
+        }))
+        .capture_action(guarded(cx, |this, _: &SelectUp, window, cx| {
+            this.vertical(-1, true, window, cx)
+        }))
+        .capture_action(guarded(cx, |this, _: &SelectDown, window, cx| {
+            this.vertical(1, true, window, cx)
+        }))
+        .capture_action(guarded(cx, |this, _: &MoveLeft, window, cx| {
+            this.edit_horizontal(-1, window, cx)
+        }))
+        .capture_action(guarded(cx, |this, _: &MoveRight, window, cx| {
+            this.edit_horizontal(1, window, cx)
+        }))
+        .capture_action(guarded(cx, |this, _: &Escape, window, cx| {
             if this.editing() {
                 this.edit_escape(window, cx);
             } else {
@@ -64,13 +77,13 @@ impl BlockEditor {
                 this.sel_escape(window, cx);
             }
         }))
-        .capture_action(
-            cx.listener(|this, _: &IndentInline, window, cx| this.indent_key(1, window, cx)),
-        )
-        .capture_action(
-            cx.listener(|this, _: &OutdentInline, window, cx| this.indent_key(-1, window, cx)),
-        )
-        .capture_action(cx.listener(|this, _: &SelectAll, window, cx| {
+        .capture_action(guarded(cx, |this, _: &IndentInline, window, cx| {
+            this.indent_key(1, window, cx)
+        }))
+        .capture_action(guarded(cx, |this, _: &OutdentInline, window, cx| {
+            this.indent_key(-1, window, cx)
+        }))
+        .capture_action(guarded(cx, |this, _: &SelectAll, window, cx| {
             if this.editing() {
                 this.edit_select_all(window, cx);
             } else {
@@ -78,9 +91,13 @@ impl BlockEditor {
                 this.select_all(window, cx);
             }
         }))
-        .capture_action(cx.listener(|this, _: &Copy, window, cx| this.copy_key(false, window, cx)))
-        .capture_action(cx.listener(|this, _: &Cut, window, cx| this.copy_key(true, window, cx)))
-        .capture_action(cx.listener(|this, _: &Paste, window, cx| {
+        .capture_action(guarded(cx, |this, _: &Copy, window, cx| {
+            this.copy_key(false, window, cx)
+        }))
+        .capture_action(guarded(cx, |this, _: &Cut, window, cx| {
+            this.copy_key(true, window, cx)
+        }))
+        .capture_action(guarded(cx, |this, _: &Paste, window, cx| {
             if this.editing() {
                 this.paste_into_block(window, cx);
             } else {
@@ -88,12 +105,12 @@ impl BlockEditor {
                 this.paste_blocks(window, cx);
             }
         }))
-        .capture_action(
-            cx.listener(|this, _: &Undo, window, cx| this.history_key(false, window, cx)),
-        )
-        .capture_action(
-            cx.listener(|this, _: &Redo, window, cx| this.history_key(true, window, cx)),
-        )
+        .capture_action(guarded(cx, |this, _: &Undo, window, cx| {
+            this.history_key(false, window, cx)
+        }))
+        .capture_action(guarded(cx, |this, _: &Redo, window, cx| {
+            this.history_key(true, window, cx)
+        }))
         .on_action(cx.listener(|this, _: &DuplicateBlocks, window, cx| {
             if let Some(range) = this.target() {
                 this.duplicate_range(range, window, cx);

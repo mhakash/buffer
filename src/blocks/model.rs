@@ -200,6 +200,159 @@ fn unquote(s: &str) -> &str {
     s
 }
 
+/// `body` with `key: value` set: the first `key:` line is rewritten in place, else the line is
+/// appended. Values that `parse_config` would trim or unquote are quoted.
+pub fn set_param(body: &str, key: &str, value: &str) -> String {
+    let value = value.replace(['\n', '\r'], " ");
+    let value = if value != value.trim() || value.starts_with(['"', '\'']) {
+        let q = if value.contains('"') { '\'' } else { '"' };
+        format!("{q}{value}{q}")
+    } else {
+        value
+    };
+    let line = format!("{key}: {value}");
+    let mut lines: Vec<String> = body.lines().map(str::to_string).collect();
+    let existing = lines.iter().position(|l| {
+        let l = l.trim();
+        !l.starts_with('#') && l.split_once(':').is_some_and(|(k, _)| k.trim() == key)
+    });
+    match existing {
+        Some(ix) => lines[ix] = line,
+        None => {
+            while lines.last().is_some_and(|l| l.trim().is_empty()) {
+                lines.pop();
+            }
+            lines.push(line);
+        }
+    }
+    lines.join("\n")
+}
+
+/// Fence info string of controls a script prints in its output: ```` ```input ````.
+pub const INPUT_FENCE: &str = "input";
+
+/// Input key a button run gets: the button's name. Never written to the fence.
+pub const ACTION: &str = "action";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ControlKind {
+    Text,
+    Number,
+    Toggle,
+    Select,
+    Button,
+}
+
+/// One control from an ```` ```input ```` fence in a block's output. Its value is the fence
+/// config's `name`, else `default`; changing it writes `name: value` into the note's fence.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Control {
+    pub kind: ControlKind,
+    pub name: String,
+    pub label: String,
+    pub placeholder: String,
+    pub default: String,
+    pub options: Vec<String>,
+}
+
+impl Control {
+    pub fn value(&self, config: &Config) -> String {
+        config.get(&self.name).unwrap_or(&self.default).clone()
+    }
+
+    pub fn checked(&self, config: &Config) -> bool {
+        ParamKind::Bool.value(&self.value(config)) == Value::Bool(true)
+    }
+
+    /// The label, else the name.
+    pub fn title(&self) -> &str {
+        if self.label.is_empty() {
+            &self.name
+        } else {
+            &self.label
+        }
+    }
+}
+
+/// One control per line: `<kind> <name> key=value key="quoted value"…`, kinds `text`,
+/// `number`, `toggle`, `select`, `button`; keys `label`, `placeholder`, `default`, `options`
+/// (`|`-separated). Blank lines, `#` comments and unknown kinds are skipped.
+pub fn parse_controls(body: &str) -> Vec<Control> {
+    body.lines()
+        .filter_map(|line| {
+            let mut words = split_words(line.trim()).into_iter();
+            let kind = match words.next()?.as_str() {
+                "text" => ControlKind::Text,
+                "number" => ControlKind::Number,
+                "toggle" => ControlKind::Toggle,
+                "select" => ControlKind::Select,
+                "button" => ControlKind::Button,
+                _ => return None,
+            };
+            let name = words.next().filter(|n| !n.contains('=') && n != ACTION)?;
+            let mut control = Control {
+                kind,
+                name,
+                label: String::new(),
+                placeholder: String::new(),
+                default: String::new(),
+                options: Vec::new(),
+            };
+            for word in words {
+                let Some((key, value)) = word.split_once('=') else {
+                    continue;
+                };
+                match key {
+                    "label" => control.label = value.into(),
+                    "placeholder" => control.placeholder = value.into(),
+                    "default" => control.default = value.into(),
+                    "options" => {
+                        control.options = value
+                            .split('|')
+                            .map(|o| o.trim().to_string())
+                            .filter(|o| !o.is_empty())
+                            .collect()
+                    }
+                    _ => {}
+                }
+            }
+            if kind == ControlKind::Select && control.default.is_empty() {
+                control.default = control.options.first().cloned().unwrap_or_default();
+            }
+            Some(control)
+        })
+        .collect()
+}
+
+/// Splits on whitespace; double quotes group (and are dropped), `\"` is a literal quote.
+fn split_words(line: &str) -> Vec<String> {
+    let (mut words, mut word, mut quoted, mut started) = (Vec::new(), String::new(), false, false);
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if quoted => word.extend(chars.next()),
+            '"' => {
+                quoted = !quoted;
+                started = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if started {
+                    words.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            c => {
+                word.push(c);
+                started = true;
+            }
+        }
+    }
+    if started {
+        words.push(word);
+    }
+    words
+}
+
 /// A run's result; cached in `.cache/blocks/<key>.json`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Output {
@@ -330,6 +483,64 @@ mod tests {
                 ("q".into(), "hi".into()),
             ])
         );
+    }
+
+    #[test]
+    fn sets_params_in_place_or_appends() {
+        let body = "# filters\nlimit: 5\nq: old\n\n";
+        assert_eq!(
+            set_param(body, "q", "new one"),
+            "# filters\nlimit: 5\nq: new one\n"
+        );
+        assert_eq!(
+            set_param(body, "done", "true"),
+            "# filters\nlimit: 5\nq: old\ndone: true"
+        );
+        assert_eq!(set_param("", "q", "x"), "q: x");
+        assert_eq!(set_param("#q: no", "q", "x"), "#q: no\nq: x");
+        for value in [" padded ", "\"quoted\"", "say \"hi\" ", "a: b", ""] {
+            let config = parse_config(&set_param("q: old", "q", value));
+            assert_eq!(config["q"], value, "{value:?}");
+        }
+        assert_eq!(parse_config(&set_param("", "q", "a\nb"))["q"], "a b");
+    }
+
+    #[test]
+    fn parses_controls() {
+        let controls = parse_controls(
+            "text q label=Search placeholder=\"e.g. \\\"bug\\\" in title\"\n\
+             # comment\n\
+             number limit default=10\n\
+             toggle mine label=\"Only mine\"\n\
+             select status options=\"Open | In progress|Done\"\n\
+             button sync label=Sync\n\
+             slider x\n\
+             text\n\
+             button action\n",
+        );
+        let kinds: Vec<_> = controls.iter().map(|c| (c.kind, c.name.as_str())).collect();
+        assert_eq!(
+            kinds,
+            [
+                (ControlKind::Text, "q"),
+                (ControlKind::Number, "limit"),
+                (ControlKind::Toggle, "mine"),
+                (ControlKind::Select, "status"),
+                (ControlKind::Button, "sync"),
+            ]
+        );
+        assert_eq!(controls[0].label, "Search");
+        assert_eq!(controls[0].placeholder, "e.g. \"bug\" in title");
+        assert_eq!(controls[1].title(), "limit");
+        assert_eq!(controls[2].title(), "Only mine");
+        assert_eq!(controls[3].options, ["Open", "In progress", "Done"]);
+        assert_eq!(controls[3].default, "Open");
+
+        let config = parse_config("limit: 3\nmine: yes");
+        assert_eq!(controls[1].value(&config), "3");
+        assert_eq!(controls[1].value(&Config::new()), "10");
+        assert!(controls[2].checked(&config));
+        assert!(!controls[2].checked(&Config::new()));
     }
 
     #[test]

@@ -27,7 +27,7 @@ use crate::{
     },
     components::{
         confirm::{confirm, confirm_delete},
-        icon_button, markdown_style, output_view, property_row,
+        icon_button, markdown_style, output_view, preview_controls, property_row,
     },
     storage,
 };
@@ -959,12 +959,12 @@ impl BlocksPage {
                         .child(status),
                 )
                 .when(!out.markdown.trim().is_empty(), |d| {
-                    d.child(output_view(
+                    d.child(preview_controls(output_view(
                         "block-test-output",
                         out.markdown.clone(),
                         markdown_style(),
                         storage::path(&store::folder(&self.selected.clone().unwrap_or_default())),
-                    ))
+                    )))
                 })
                 .when(!out.stderr.is_empty(), |d| {
                     d.child(

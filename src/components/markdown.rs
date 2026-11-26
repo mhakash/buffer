@@ -32,6 +32,7 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::{Pixels, Point};
 
+use super::block_controls::{BlockHost, ControlCtx, ControlsPlugin, shown_output};
 use super::lightbox;
 use crate::blocks::{self, model::Config};
 
@@ -66,7 +67,18 @@ pub fn markdown_view(
     style: TextViewStyle,
     dir: PathBuf,
 ) -> TextView {
-    output_view(id, text, style.clone(), dir.clone()).plugin(BlockPlugin { dir, style })
+    hosted_markdown_view(id, text, style, dir, None)
+}
+
+/// [`markdown_view`] for an editor that takes values from controls in block output.
+pub fn hosted_markdown_view(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    style: TextViewStyle,
+    dir: PathBuf,
+    host: Option<BlockHost>,
+) -> TextView {
+    output_view(id, text, style.clone(), dir.clone()).plugin(BlockPlugin { dir, style, host })
 }
 
 /// Everything but programmatic blocks: a block's own output can't run more blocks.
@@ -696,6 +708,7 @@ struct BlockPlugin {
     dir: PathBuf,
     /// The surrounding view's style: output reads as part of the note.
     style: TextViewStyle,
+    host: Option<BlockHost>,
 }
 
 struct Fence {
@@ -768,8 +781,13 @@ impl MarkdownPlugin for BlockPlugin {
         };
         blocks::ensure(&ty, &fence.config, cx);
         let status = blocks::status(&ty, &fence.config, cx);
+        let shown = shown_output(self.host.as_ref(), &ty.name, status.output.clone(), cx);
         let key = ty.key(&fence.config);
-        let id = u64::from_str_radix(&key, 16).unwrap_or_default();
+        // Per block instance when hosted, so a new value doesn't rebuild the output.
+        let id = self.host.as_ref().map_or_else(
+            || u64::from_str_radix(&key, 16).unwrap_or_default(),
+            |h| h.id,
+        );
         let group: SharedString = format!("block-{key}").into();
         let now = chrono::Utc::now();
 
@@ -785,8 +803,7 @@ impl MarkdownPlugin for BlockPlugin {
             .path(blocks::icon_path(&ty.icon, cx))
             .xsmall()
             .text_color(theme.muted_foreground);
-        let has_output = status
-            .output
+        let has_output = shown
             .as_ref()
             .is_some_and(|o| !o.markdown.trim().is_empty());
         // The meta line shows on hover, or always when something needs attention.
@@ -863,7 +880,15 @@ impl MarkdownPlugin for BlockPlugin {
                 )
         });
 
-        let body = status.output.as_ref().and_then(|out| {
+        let controls = ControlCtx {
+            id,
+            ty: ty.name.clone(),
+            config: fence.config.clone(),
+            host: self.host.clone(),
+            enabled: trusted && self.host.is_some(),
+            running: status.running,
+        };
+        let body = shown.as_ref().and_then(|out| {
             (!out.markdown.trim().is_empty()).then(|| {
                 // Clicks here select text, copy and follow links; the note editor must not take
                 // them as "edit this block" (that's the meta line's Edit). The click is claimed
@@ -873,12 +898,15 @@ impl MarkdownPlugin for BlockPlugin {
                     .id(("block-body", id))
                     .cursor(CursorStyle::IBeam)
                     .on_click(|event, _, _| claim_click(event.position()))
-                    .child(output_view(
-                        ("block-out", id),
-                        out.markdown.clone(),
-                        self.style.clone(),
-                        self.dir.clone(),
-                    ))
+                    .child(
+                        output_view(
+                            ("block-out", id),
+                            out.markdown.clone(),
+                            self.style.clone(),
+                            self.dir.clone(),
+                        )
+                        .plugin(ControlsPlugin(controls)),
+                    )
                     .into_any_element()
             })
         });

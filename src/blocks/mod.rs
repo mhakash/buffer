@@ -4,7 +4,7 @@
 //!
 //! | File | Concern |
 //! |---|---|
-//! | `model` | block type, fence config, output (pure, tested) |
+//! | `model` | block type, fence config, output, the controls output can print (pure, tested) |
 //! | `store` | files on disk |
 //! | `runner` | running a script (blocking, tested) |
 //!
@@ -86,7 +86,7 @@ pub fn reload_if_changed(cx: &mut App) {
 /// Runs a block once for the Blocks page's test run: no cache, no dedup, and no trust check
 /// (the user is running the script they are editing).
 pub fn run_once(ty: &BlockType, config: &Config, cx: &App) -> oneshot::Receiver<Output> {
-    let job = job(ty, config, cx);
+    let job = job(ty, config, None, cx);
     let (tx, rx) = oneshot::channel();
     thread::spawn(move || {
         let _ = tx.send(match job {
@@ -98,8 +98,8 @@ pub fn run_once(ty: &BlockType, config: &Config, cx: &App) -> oneshot::Receiver<
 }
 
 /// What to run. `secret:NAME` / `config:NAME` Environment values are resolved from the vault
-/// here; one that isn't set fails the run with that message.
-fn job(ty: &BlockType, config: &Config, cx: &App) -> Result<Job, String> {
+/// here; one that isn't set fails the run with that message. `action` = the button pressed.
+fn job(ty: &BlockType, config: &Config, action: Option<&str>, cx: &App) -> Result<Job, String> {
     let workspace = workspaces::get(cx).active().id;
     let vault = vault::get(cx);
     let mut env = vault::script_env(workspace);
@@ -115,11 +115,15 @@ fn job(ty: &BlockType, config: &Config, cx: &App) -> Result<Job, String> {
         };
         env.push((key.clone(), value));
     }
+    let mut input = ty.input(config);
+    if let Some(action) = action {
+        input.insert(model::ACTION.into(), action.into());
+    }
     Ok(Job {
         shell: runner::login_shell(),
         dir: storage::path(&store::folder(&ty.name)),
         command: Job::command(&ty.interpreter, &ty.script),
-        input: ty.input(config),
+        input,
         env,
         timeout: Duration::from_secs(ty.timeout),
     })
@@ -171,18 +175,26 @@ pub fn ensure(ty: &BlockType, config: &Config, cx: &mut App) {
         .output
         .is_some_and(|o| o.is_fresh(ty.ttl, Utc::now()));
     if !fresh {
-        start(ty, config, cx);
+        start(ty, config, None, cx);
     }
 }
 
 /// Runs the block now (unless it is already running or block scripts aren't allowed).
 pub fn refresh(ty: &BlockType, config: &Config, cx: &mut App) {
     if workspaces::blocks_trusted(cx) {
-        start(ty, config, cx);
+        start(ty, config, None, cx);
     }
 }
 
-fn start(ty: &BlockType, config: &Config, cx: &mut App) {
+/// A button in the block's output: runs it now with `action: <name>` in its input. The result
+/// replaces the block's output like any run.
+pub fn run_action(ty: &BlockType, config: &Config, action: &str, cx: &mut App) {
+    if workspaces::blocks_trusted(cx) {
+        start(ty, config, Some(action), cx);
+    }
+}
+
+fn start(ty: &BlockType, config: &Config, action: Option<&str>, cx: &mut App) {
     let key = ty.key(config);
     if !cx.default_global::<Blocks>().running.insert(key.clone()) {
         return;
@@ -190,7 +202,7 @@ fn start(ty: &BlockType, config: &Config, cx: &mut App) {
     let generation = GENERATION.load(Ordering::Relaxed);
     // Paths resolved now: the workspace may switch before the run ends.
     let cache = storage::path(&store::cache_file(&key));
-    let job = job(ty, config, cx);
+    let job = job(ty, config, action, cx);
     let previous = cx
         .default_global::<Blocks>()
         .results
